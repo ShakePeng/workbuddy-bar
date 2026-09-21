@@ -1,0 +1,29 @@
+{
+  "name": "workbuddy-bar",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "vue-tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build --target aarch64-apple-darwin",
+    "dmg": "tauri build --target aarch64-apple-darwin --bundles dmg && cp -f src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg .",
+    "icon": "tauri icon src-tauri/icons/app-source.png"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16",
+    "vue-tsc": "^3.3.5"
+  }
+}

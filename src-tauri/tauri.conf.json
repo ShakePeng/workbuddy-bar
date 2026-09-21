@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WorkBuddyBar",
+  "version": "0.1.0",
+  "identifier": "cn.shakepeng.workbuddybar",
+  "build": {
+    "beforeDevCommand": "yarn dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "yarn build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "login",
+        "title": "登录 WorkBuddyBar",
+        "url": "index.html?view=login",
+        "width": 430,
+        "height": 560,
+        "minWidth": 430,
+        "minHeight": 560,
+        "maxWidth": 430,
+        "maxHeight": 560,
+        "resizable": false,
+        "center": true,
+        "visible": false
+      },
+      {
+        "label": "popover",
+        "title": "WorkBuddyBar",
+        "url": "index.html?view=popover",
+        "width": 400,
+        "height": 720,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "settings",
+        "title": "WorkBuddyBar 设置",
+        "url": "index.html?view=settings",
+        "width": 540,
+        "height": 640,
+        "minWidth": 540,
+        "minHeight": 640,
+        "maxWidth": 540,
+        "maxHeight": 640,
+        "resizable": false,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; script-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg"],
+    "category": "Utility",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}
