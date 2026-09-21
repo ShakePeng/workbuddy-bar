@@ -1,0 +1,91 @@
+.gitignore
+  s_44867e92a7e42a::t_6385073c9cb5e7 1-6
+README.md
+  s_44867e92a7e42a::t_cd7976065aa6a5 1-7
+index.html
+  s_44867e92a7e42a::t_755c6dd8e8d36d 1-13
+package.json
+  s_44867e92a7e42a::t_95b5639eee8188 1-29
+scripts/generate-tray-icons.py
+  s_44867e92a7e42a::t_9ccb90d12f9d03 1-71
+src-tauri/.gitignore
+  s_44867e92a7e42a::t_5e4e6a4b022c06 1-7
+src-tauri/Cargo.lock
+  s_44867e92a7e42a::t_1aa95cf46b3ee0 1-5464
+src-tauri/Cargo.toml
+  s_44867e92a7e42a::t_6571969f258d40 1-33
+src-tauri/build.rs
+  s_44867e92a7e42a::t_8eefcb3153d246 1-3
+src-tauri/capabilities/default.json
+  s_f485e006b0c00d::t_52976b981f7b05 1-10
+src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml
+  s_44867e92a7e42a::t_c4aae7b8f012f2 1-5
+src-tauri/icons/android/values/ic_launcher_background.xml
+  s_44867e92a7e42a::t_dd508a9bd5ee11 1-4
+src-tauri/src/lib.rs
+  s_8548821b4a3aca::t_3af41f35d4c099 1-1278
+src-tauri/src/main.rs
+  s_44867e92a7e42a::t_2cb8991a87beab 1-5
+src-tauri/tauri.conf.json
+  s_8548821b4a3aca::t_1d2188478cb38b 1-76
+src/App.vue
+  s_44867e92a7e42a::t_49dd0ba53a2d22 1-13
+src/components/LoginView.vue
+  s_44867e92a7e42a::t_0d549df109250d 1-94
+src/components/PopoverView.vue
+  s_44867e92a7e42a::t_377f05767f289d 1-200
+src/components/SettingsView.vue
+  s_44867e92a7e42a::t_de33a14dc7e47e 1-149
+src/components/Sparkline.vue
+  s_44867e92a7e42a::t_dfe3130d2cd7ab 1-56
+src/lib/format.ts
+  s_44867e92a7e42a::t_4fffee929118fd 1-73
+src/main.ts
+  s_44867e92a7e42a::t_ec470dda4ce200 1-5
+src/style.css
+  s_8548821b4a3aca::t_0c02a05bb1fd9f 1-777
+src/types.ts
+  s_44867e92a7e42a::t_00ed2e03b8bae7 1-70
+src/vite-env.d.ts
+  s_44867e92a7e42a::t_dc9a119fb577b7 1-7
+tsconfig.json
+  s_44867e92a7e42a::t_edbed08046a466 1-25
+tsconfig.node.json
+  s_44867e92a7e42a::t_24c4e3a851cf64 1-10
+vite.config.ts
+  s_44867e92a7e42a::t_05c247192ea3fe 1-32
+yarn.lock
+  s_44867e92a7e42a::t_6b7a31e62f1f3f 1-546
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "d620d0e3af4b947b667eeb3bf9667f16fab85a03",
+  "prompts": {},
+  "sessions": {
+    "s_44867e92a7e42a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c33a-3086-7e50-ab2e-b90ea9ef307f",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "彭振东 <pzd6391@ly.com>"
+    },
+    "s_8548821b4a3aca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c371-9530-7080-9939-8e7e53776369",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "彭振东 <pzd6391@ly.com>"
+    },
+    "s_f485e006b0c00d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c35b-b2cf-7a23-b4c0-986b060a1f25",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "彭振东 <pzd6391@ly.com>"
+    }
+  }
+}
