@@ -429,6 +429,42 @@ fn parse_accounts(value: &Value) -> (Vec<AccountView>, u64, u64, bool, Option<f6
     )
 }
 
+fn apply_realtime_credits(accounts: &mut [AccountView], value: &Value) -> (u64, bool, Option<f64>) {
+    let credits = value.get("credits").and_then(Value::as_object);
+    let mut synced_accounts = 0_u64;
+    let mut total_credits = 0.0_f64;
+    let mut found_credit = false;
+    let mut partial = false;
+
+    for account in accounts {
+        // 实时接口按 uid 返回；null 表示本次查询失败，保留上游快照值作为兜底。
+        let realtime_credits = credits
+            .and_then(|map| map.get(&account.uid))
+            .and_then(|raw| value_f64(Some(raw)));
+        if let Some(amount) = realtime_credits.filter(|amount| amount.is_finite()) {
+            account.credits = Some(amount);
+        }
+
+        if account.disabled {
+            continue;
+        }
+        match account.credits {
+            Some(amount) if amount.is_finite() => {
+                synced_accounts += 1;
+                found_credit = true;
+                total_credits += amount.max(0.0);
+            }
+            _ => partial = true,
+        }
+    }
+
+    (
+        synced_accounts,
+        partial,
+        found_credit.then_some((total_credits * 100.0).round() / 100.0),
+    )
+}
+
 fn parse_usage_summary(value: &Value) -> UsageSummary {
     UsageSummary {
         today_requests: value_u64(value.get("today_requests")),
@@ -567,14 +603,50 @@ async fn get_json(client: &Client, config: &AppConfig, path: &str) -> Result<Val
         .map_err(|error| ApiError::Message(format!("管理端响应格式错误：{error}")))
 }
 
+async fn post_json(client: &Client, config: &AppConfig, path: &str) -> Result<Value, ApiError> {
+    let mut request = client.post(format!("{}{}", config.base_url, path));
+    if !config.session_cookie.is_empty() {
+        request = request.header(COOKIE, format!("wb_session={}", config.session_cookie));
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| ApiError::Message(format!("无法连接管理端：{error}")))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| ApiError::Message(format!("读取管理端响应失败：{error}")))?;
+
+    if status == StatusCode::UNAUTHORIZED {
+        return Err(ApiError::AuthExpired);
+    }
+    if !status.is_success() {
+        return Err(ApiError::Message(api_message(status, &body)));
+    }
+    serde_json::from_str(&body)
+        .map_err(|error| ApiError::Message(format!("管理端响应格式错误：{error}")))
+}
+
 async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapshot, ApiError> {
-    let _me = get_json(client, config, "/api/me").await?;
+    let me = get_json(client, config, "/api/me").await?;
     let accounts = get_json(client, config, "/api/accounts").await?;
     let summary = get_json(client, config, "/api/stats/summary").await?;
     let daily = get_json(client, config, "/api/stats/daily?days=30").await?;
 
-    let (parsed_accounts, enabled_accounts, credit_synced_accounts, credit_partial, total_credits) =
-        parse_accounts(&accounts);
+    let (
+        mut parsed_accounts,
+        enabled_accounts,
+        mut credit_synced_accounts,
+        mut credit_partial,
+        mut total_credits,
+    ) = parse_accounts(&accounts);
+    if me.get("role").and_then(Value::as_str) == Some("admin") {
+        let realtime_credits =
+            post_json(client, config, "/api/accounts/refresh-credits?force=false").await?;
+        (credit_synced_accounts, credit_partial, total_credits) =
+            apply_realtime_credits(&mut parsed_accounts, &realtime_credits);
+    }
     let now = now_secs();
 
     Ok(AppSnapshot {
@@ -1267,6 +1339,26 @@ mod tests {
         assert_eq!(synced, 1);
         assert!(partial);
         assert_eq!(total, Some(10.0));
+    }
+
+    #[test]
+    fn applies_realtime_credit_overrides() {
+        let accounts = json!({
+            "accounts": [
+                {"uid": "1", "credits": 0, "healthy": true, "in_pool": true},
+                {"uid": "2", "credits": 50, "healthy": true, "in_pool": true}
+            ]
+        });
+        let (mut items, _, _, _, _) = parse_accounts(&accounts);
+        let realtime = json!({"credits": {"1": 6432, "2": null}});
+
+        let (synced, partial, total) = apply_realtime_credits(&mut items, &realtime);
+
+        assert_eq!(items[0].credits, Some(6432.0));
+        assert_eq!(items[1].credits, Some(50.0));
+        assert_eq!(synced, 2);
+        assert!(!partial);
+        assert_eq!(total, Some(6482.0));
     }
 
     #[test]
