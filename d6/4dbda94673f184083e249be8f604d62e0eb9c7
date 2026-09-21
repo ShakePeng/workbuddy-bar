@@ -1,0 +1,21 @@
+src-tauri/src/lib.rs
+  s_8548821b4a3aca::t_d200c0ad0cccbc 1345-1363
+  s_8548821b4a3aca::t_5e642af1cd1f25 432-467,606-630,632,637-649
+  s_8548821b4a3aca::t_de94e3f25f14c2 1344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "d64dbda94673f184083e249be8f604d62e0eb9c7",
+  "prompts": {},
+  "sessions": {
+    "s_8548821b4a3aca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c371-9530-7080-9939-8e7e53776369",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "彭振东 <pzd6391@ly.com>"
+    }
+  }
+}
