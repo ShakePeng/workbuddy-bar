@@ -1223,14 +1223,26 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let manager = app.autolaunch();
+
+    // Windows 下该插件通过注册表 HKCU\...\CurrentVersion\Run 实现自启：
+    // 当自启项不存在时，disable() 会触发 RegDeleteValueW 返回
+    // ERROR_FILE_NOT_FOUND，即「系统找不到指定的文件。(os error 2)」。
+    // 因此先查询真实状态，仅在需要变更时才写入，保证开关幂等。
+    if matches!(manager.is_enabled(), Ok(current) if current == enabled) {
+        return Ok(());
+    }
+
     if enabled {
         manager
             .enable()
             .map_err(|error| format!("开启开机启动失败：{error}"))
     } else {
-        manager
-            .disable()
-            .map_err(|error| format!("关闭开机启动失败：{error}"))
+        match manager.disable() {
+            Ok(()) => Ok(()),
+            // 注册表中本就没有该条目，等价于已经关闭，不必报错
+            Err(_) if matches!(manager.is_enabled(), Ok(false)) => Ok(()),
+            Err(error) => Err(format!("关闭开机启动失败：{error}")),
+        }
     }
 }
 
