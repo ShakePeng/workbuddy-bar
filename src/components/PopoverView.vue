@@ -78,10 +78,6 @@ async function logout() {
   await invoke("logout");
 }
 
-async function quit() {
-  await invoke("quit_app");
-}
-
 onMounted(async () => {
   await load();
   unlisten = await listen<AppSnapshot>("snapshot-changed", (event) => {
@@ -191,9 +187,6 @@ onUnmounted(() => unlisten?.());
       <button type="button" class="danger" @click="logout">
         <svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M21 4v16" /></svg>
         退出登录
-      </button>
-      <button type="button" class="icon-only" title="退出 WorkBuddyBar" @click="quit">
-        <svg viewBox="0 0 24 24"><path d="M12 2v10M5 5a9 9 0 1 0 14 0" /></svg>
       </button>
     </footer>
   </main>
