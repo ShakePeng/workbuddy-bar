@@ -121,7 +121,7 @@ onMounted(load);
         </label>
         <label class="switch-row">
           <span>
-            <b>登录 macOS 后自动启动</b>
+            <b>登录系统后自动启动</b>
             <small>默认关闭</small>
           </span>
           <input v-model="form.launchAtLogin" type="checkbox" />

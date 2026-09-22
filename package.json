@@ -11,7 +11,9 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build --target aarch64-apple-darwin",
+    "tauri:build": "tauri build",
+    "tauri:build:macos": "tauri build --target aarch64-apple-darwin --bundles dmg",
+    "tauri:build:windows": "tauri build --bundles nsis",
     "dmg": "tauri build --target aarch64-apple-darwin --bundles dmg && cp -f src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg .",
     "icon": "tauri icon src-tauri/icons/app-source.png"
   },

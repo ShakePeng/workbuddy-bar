@@ -3,4 +3,6 @@
 /src-tauri/target
 /src-tauri/gen
 *.dmg
+*.exe
+*.msi
 .DS_Store

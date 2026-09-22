@@ -1,7 +1,32 @@
-# Tauri + Vue + TypeScript
+# WorkBuddyBar
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+基于 Tauri 2、Vue 3 和 TypeScript 的 WorkBuddy 管理端状态托盘应用，支持 macOS 和 Windows。
 
-## Recommended IDE Setup
+## 开发
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```bash
+yarn install
+yarn tauri:dev
+```
+
+## 构建
+
+构建当前平台的安装包：
+
+```bash
+yarn tauri:build
+```
+
+构建 Windows NSIS 安装包：
+
+```bash
+yarn tauri:build:windows
+```
+
+构建 macOS Apple Silicon DMG：
+
+```bash
+yarn tauri:build:macos
+```
+
+Windows 构建需要 Rust MSVC 工具链和 WebView2。安装包会输出到 `src-tauri/target/release/bundle/`。

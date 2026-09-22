@@ -11,7 +11,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, LogicalPosition, Manager, Position, State};
+#[cfg(not(target_os = "windows"))]
+use tauri::LogicalPosition;
+use tauri::{AppHandle, Emitter, Manager, Position, State};
 use url::Url;
 
 const TRAY_ID: &str = "workbuddybar";
@@ -874,52 +876,141 @@ fn toggle_popover(app: &AppHandle) {
         return;
     }
 
-    let Ok(cursor) = app.cursor_position() else {
+    #[cfg(target_os = "windows")]
+    {
+        position_popover_windows(app, &window);
+        return;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let Ok(cursor) = app.cursor_position() else {
+            show_popover_centered(app);
+            return;
+        };
+        let current_scale = window.scale_factor().unwrap_or(1.0);
+        let primary_scale = app
+            .primary_monitor()
+            .ok()
+            .flatten()
+            .map(|monitor| monitor.scale_factor())
+            .unwrap_or(1.0);
+
+        // cursor_position 始终按主屏缩放输出，统一还原成 macOS 全局逻辑坐标后再选屏。
+        let logical_x = cursor.x / primary_scale;
+        let logical_y = cursor.y / primary_scale;
+        let target_monitor = app
+            .monitor_from_point(logical_x, logical_y)
+            .ok()
+            .flatten()
+            .or_else(|| app.primary_monitor().ok().flatten());
+        // 窗口位置统一使用逻辑坐标，避免 set_position 按隐藏窗口所在屏幕的缩放因子重复换算。
+        let current_size = window
+            .outer_size()
+            .unwrap_or(tauri::PhysicalSize::new(400, 720));
+        let logical_size = current_size.to_logical::<f64>(current_scale);
+        let mut x = logical_x - logical_size.width / 2.0;
+        let mut y = logical_y + 12.0;
+
+        if let Some(monitor) = target_monitor.as_ref() {
+            let area = monitor.work_area();
+            let scale = monitor.scale_factor();
+            let left = area.position.x as f64 / scale;
+            let top = area.position.y as f64 / scale;
+            let right = left + area.size.width as f64 / scale;
+            let bottom = top + area.size.height as f64 / scale;
+            y = top + 10.0;
+            x = x.clamp(
+                left + 8.0,
+                (right - logical_size.width - 8.0).max(left + 8.0),
+            );
+            if y + logical_size.height > bottom - 8.0 {
+                y = (logical_y - logical_size.height - 10.0).max(top + 8.0);
+            }
+        }
+
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn tray_rect_physical(rect: tauri::Rect) -> (f64, f64, f64, f64) {
+    let position = rect.position.to_physical::<f64>(1.0);
+    let size = rect.size.to_physical::<u32>(1.0);
+    (
+        position.x,
+        position.y,
+        size.width as f64,
+        size.height as f64,
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn position_popover_windows(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let tray_rect = app
+        .tray_by_id(TRAY_ID)
+        .and_then(|tray| tray.rect().ok().flatten());
+    let cursor = app.cursor_position().ok();
+    let anchor = tray_rect
+        .map(|rect| {
+            let (x, y, width, height) = tray_rect_physical(rect);
+            (x + width / 2.0, y + height / 2.0)
+        })
+        .or_else(|| cursor.map(|position| (position.x, position.y)));
+    let Some((anchor_x, anchor_y)) = anchor else {
         show_popover_centered(app);
         return;
     };
-    let current_scale = window.scale_factor().unwrap_or(1.0);
-    let primary_scale = app
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .map(|monitor| monitor.scale_factor())
-        .unwrap_or(1.0);
 
-    // cursor_position 始终按主屏缩放输出，统一还原成 macOS 全局逻辑坐标后再选屏。
-    let logical_x = cursor.x / primary_scale;
-    let logical_y = cursor.y / primary_scale;
     let target_monitor = app
-        .monitor_from_point(logical_x, logical_y)
+        .monitor_from_point(anchor_x, anchor_y)
         .ok()
         .flatten()
         .or_else(|| app.primary_monitor().ok().flatten());
-    // 窗口位置统一使用逻辑坐标，避免 set_position 按隐藏窗口所在屏幕的缩放因子重复换算。
-    let current_size = window
-        .outer_size()
-        .unwrap_or(tauri::PhysicalSize::new(400, 720));
-    let logical_size = current_size.to_logical::<f64>(current_scale);
-    let mut x = logical_x - logical_size.width / 2.0;
-    let mut y = logical_y + 12.0;
+    let fallback_scale = target_monitor
+        .as_ref()
+        .map(|monitor| monitor.scale_factor())
+        .unwrap_or(1.0);
+    let window_size = window.outer_size().unwrap_or_else(|_| {
+        tauri::PhysicalSize::new(
+            (400.0 * fallback_scale).round() as u32,
+            (720.0 * fallback_scale).round() as u32,
+        )
+    });
+
+    let mut x = anchor_x - window_size.width as f64 / 2.0;
+    let mut y = anchor_y + 12.0;
 
     if let Some(monitor) = target_monitor.as_ref() {
         let area = monitor.work_area();
-        let scale = monitor.scale_factor();
-        let left = area.position.x as f64 / scale;
-        let top = area.position.y as f64 / scale;
-        let right = left + area.size.width as f64 / scale;
-        let bottom = top + area.size.height as f64 / scale;
-        y = top + 10.0;
-        x = x.clamp(
-            left + 8.0,
-            (right - logical_size.width - 8.0).max(left + 8.0),
-        );
-        if y + logical_size.height > bottom - 8.0 {
-            y = (logical_y - logical_size.height - 10.0).max(top + 8.0);
+        let left = area.position.x as f64;
+        let top = area.position.y as f64;
+        let right = left + area.size.width as f64;
+        let bottom = top + area.size.height as f64;
+        let window_width = window_size.width as f64;
+        let window_height = window_size.height as f64;
+        let anchor_on_lower_half = anchor_y >= top + area.size.height as f64 / 2.0;
+
+        x = x.clamp(left + 8.0, (right - window_width - 8.0).max(left + 8.0));
+        y = if anchor_on_lower_half {
+            tray_rect
+                .map(|rect| tray_rect_physical(rect).1 - window_height - 10.0)
+                .unwrap_or(anchor_y - window_height - 12.0)
+        } else {
+            tray_rect
+                .map(|rect| {
+                    let (_, y, _, height) = tray_rect_physical(rect);
+                    y + height + 10.0
+                })
+                .unwrap_or(anchor_y + 12.0)
         }
+        .clamp(top + 8.0, (bottom - window_height - 8.0).max(top + 8.0));
     }
 
-    let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+    let position = tauri::PhysicalPosition::new(x.round() as i32, y.round() as i32);
+    let _ = window.set_position(Position::Physical(position));
     let _ = window.show();
     let _ = window.set_focus();
 }
@@ -1152,8 +1243,31 @@ fn open_settings(app: AppHandle) -> Result<(), String> {
 fn open_manager(app: AppHandle) -> Result<(), String> {
     let config = app.state::<AppState>().config();
     let base_url = normalize_base_url(&config.base_url)?;
+    open_external_url(&base_url)
+}
+
+#[cfg(target_os = "windows")]
+fn open_external_url(url: &str) -> Result<(), String> {
+    Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("打开管理端失败：{error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn open_external_url(url: &str) -> Result<(), String> {
     Command::new("open")
-        .arg(base_url)
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("打开管理端失败：{error}"))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn open_external_url(url: &str) -> Result<(), String> {
+    Command::new("xdg-open")
+        .arg(url)
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("打开管理端失败：{error}"))
