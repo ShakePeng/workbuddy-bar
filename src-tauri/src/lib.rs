@@ -2,6 +2,7 @@ use reqwest::header::{HeaderMap, COOKIE, SET_COOKIE};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
@@ -30,6 +31,8 @@ struct AppConfig {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    #[serde(default)]
+    key_usage_names: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -39,9 +42,10 @@ impl Default for AppConfig {
             username: String::new(),
             password: String::new(),
             session_cookie: String::new(),
-            refresh_interval_sec: 60,
+            refresh_interval_sec: 120,
             low_credit_threshold: 1000.0,
             launch_at_login: false,
+            key_usage_names: Vec::new(),
         }
     }
 }
@@ -74,6 +78,17 @@ struct UsagePoint {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct KeyUsageView {
+    id: u64,
+    name: String,
+    prefix: String,
+    enabled: bool,
+    today_tokens: u64,
+    total_tokens: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AccountView {
     file: String,
     uid: String,
@@ -99,6 +114,7 @@ struct AppSnapshot {
     last_success_at: u64,
     stale: bool,
     auth_state: String,
+    username: String,
     pool_available: bool,
     pool_synced: u64,
     account_total: u64,
@@ -109,6 +125,9 @@ struct AppSnapshot {
     accounts: Vec<AccountView>,
     today: UsageSummary,
     usage_days: Vec<UsagePoint>,
+    is_admin: bool,
+    show_key_usage: bool,
+    key_usage: Vec<KeyUsageView>,
     error: Option<String>,
 }
 
@@ -119,6 +138,7 @@ impl Default for AppSnapshot {
             last_success_at: 0,
             stale: false,
             auth_state: "login_required".into(),
+            username: String::new(),
             pool_available: false,
             pool_synced: 0,
             account_total: 0,
@@ -129,6 +149,9 @@ impl Default for AppSnapshot {
             accounts: Vec::new(),
             today: UsageSummary::default(),
             usage_days: Vec::new(),
+            is_admin: false,
+            show_key_usage: false,
+            key_usage: Vec::new(),
             error: None,
         }
     }
@@ -143,6 +166,7 @@ struct SettingsView {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    key_usage_names: Vec<String>,
     config_path: String,
 }
 
@@ -155,6 +179,8 @@ struct SettingsInput {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    #[serde(default)]
+    key_usage_names: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -232,6 +258,18 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+fn normalize_key_usage_names(names: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for raw in names {
+        let name = raw.trim();
+        if name.is_empty() || normalized.iter().any(|existing| existing == name) {
+            continue;
+        }
+        normalized.push(name.to_string());
+    }
+    normalized
+}
+
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -260,6 +298,7 @@ fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     if !config.low_credit_threshold.is_finite() || config.low_credit_threshold < 0.0 {
         config.low_credit_threshold = 1000.0;
     }
+    config.key_usage_names = normalize_key_usage_names(config.key_usage_names);
     Ok(config)
 }
 
@@ -316,15 +355,18 @@ fn value_i64(value: Option<&Value>) -> Option<i64> {
 
 fn value_bool(value: Option<&Value>) -> Option<bool> {
     value.and_then(|value| {
-        value.as_bool().or_else(|| {
-            value
-                .as_str()
-                .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
-                    "true" | "1" | "yes" => Some(true),
-                    "false" | "0" | "no" => Some(false),
-                    _ => None,
-                })
-        })
+        value
+            .as_bool()
+            .or_else(|| value.as_i64().map(|number| number != 0))
+            .or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
+                        "true" | "1" | "yes" => Some(true),
+                        "false" | "0" | "no" => Some(false),
+                        _ => None,
+                    })
+            })
     })
 }
 
@@ -504,6 +546,59 @@ fn parse_usage_days(value: &Value) -> Vec<UsagePoint> {
     points
 }
 
+fn parse_key_usage(
+    keys: &Value,
+    today: &Value,
+    allowed_names: Option<&[String]>,
+) -> Vec<KeyUsageView> {
+    let mut today_by_name: HashMap<String, u64> = HashMap::new();
+    for row in today.as_array().into_iter().flatten() {
+        let name = value_string(row.get("name"));
+        let tokens = value_u64(row.get("prompt_tokens")) + value_u64(row.get("completion_tokens"));
+        *today_by_name.entry(name).or_default() += tokens;
+    }
+
+    let mut key_usage: Vec<KeyUsageView> = keys
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|key| {
+            let id = value_u64(key.get("id"));
+            let raw_name = value_string(key.get("name"));
+            let name = if raw_name.is_empty() {
+                format!("密钥 {id}")
+            } else {
+                raw_name
+            };
+            if let Some(allowed_names) = allowed_names {
+                if !allowed_names.iter().any(|allowed| allowed == &name) {
+                    return None;
+                }
+            }
+            let today_tokens = today_by_name.get(&name).copied().unwrap_or(0);
+            Some(KeyUsageView {
+                id,
+                name,
+                prefix: value_string(key.get("prefix")),
+                enabled: value_bool(key.get("enabled")).unwrap_or(true),
+                today_tokens,
+                total_tokens: value_u64(key.get("used_tokens")),
+            })
+        })
+        .flatten()
+        .collect();
+
+    key_usage.sort_by(|left, right| {
+        right
+            .enabled
+            .cmp(&left.enabled)
+            .then_with(|| right.total_tokens.cmp(&left.total_tokens))
+            .then_with(|| right.today_tokens.cmp(&left.today_tokens))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    key_usage
+}
+
 fn api_message(status: StatusCode, raw: &str) -> String {
     let detail = serde_json::from_str::<Value>(raw)
         .ok()
@@ -635,20 +730,22 @@ async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapsh
     let accounts = get_json(client, config, "/api/accounts").await?;
     let summary = get_json(client, config, "/api/stats/summary").await?;
     let daily = get_json(client, config, "/api/stats/daily?days=30").await?;
+    let is_admin = me.get("role").and_then(Value::as_str) == Some("admin");
+    let show_key_usage = is_admin || !config.key_usage_names.is_empty();
+    let (keys, key_today) = if show_key_usage {
+        (
+            get_json(client, config, "/api/keys").await?,
+            get_json(client, config, "/api/stats/by-key?days=1").await?,
+        )
+    } else {
+        (json!([]), json!([]))
+    };
 
-    let (
-        mut parsed_accounts,
-        enabled_accounts,
-        mut credit_synced_accounts,
-        mut credit_partial,
-        mut total_credits,
-    ) = parse_accounts(&accounts);
-    if me.get("role").and_then(Value::as_str) == Some("admin") {
-        let realtime_credits =
-            post_json(client, config, "/api/accounts/refresh-credits?force=false").await?;
-        (credit_synced_accounts, credit_partial, total_credits) =
-            apply_realtime_credits(&mut parsed_accounts, &realtime_credits);
-    }
+    let (mut parsed_accounts, enabled_accounts, _, _, _) = parse_accounts(&accounts);
+    let realtime_credits =
+        post_json(client, config, "/api/accounts/refresh-credits?force=false").await?;
+    let (credit_synced_accounts, credit_partial, total_credits) =
+        apply_realtime_credits(&mut parsed_accounts, &realtime_credits);
     let now = now_secs();
 
     Ok(AppSnapshot {
@@ -656,6 +753,7 @@ async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapsh
         last_success_at: now,
         stale: false,
         auth_state: "ok".into(),
+        username: value_string(me.get("username")),
         pool_available: value_bool(accounts.get("pool_available")).unwrap_or(false),
         pool_synced: value_u64(accounts.get("pool_synced")),
         account_total: value_u64(accounts.get("total")).max(parsed_accounts.len() as u64),
@@ -666,6 +764,17 @@ async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapsh
         accounts: parsed_accounts,
         today: parse_usage_summary(&summary),
         usage_days: parse_usage_days(&daily),
+        is_admin,
+        show_key_usage,
+        key_usage: if show_key_usage {
+            parse_key_usage(
+                &keys,
+                &key_today,
+                (!is_admin).then_some(config.key_usage_names.as_slice()),
+            )
+        } else {
+            Vec::new()
+        },
         error: None,
     })
 }
@@ -781,6 +890,23 @@ fn tray_image(kind: &str) -> Image<'static> {
     Image::from_bytes(bytes).expect("invalid tray icon")
 }
 
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn workbuddy_set_tray_title(title: *const std::os::raw::c_char);
+}
+
+#[cfg(target_os = "macos")]
+fn set_readable_tray_title(title: &str) {
+    use std::ffi::CString;
+
+    if let Ok(title) = CString::new(title) {
+        unsafe { workbuddy_set_tray_title(title.as_ptr()) };
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_readable_tray_title(_title: &str) {}
+
 fn add_thousands_separators(digits: &str) -> String {
     let mut output = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, character) in digits.chars().enumerate() {
@@ -831,6 +957,7 @@ fn update_tray(app: &AppHandle, snapshot: &AppSnapshot) {
         .map(compact_number)
         .unwrap_or_else(|| "--".into());
     let _ = tray.set_title(Some(&title));
+    set_readable_tray_title(&title);
 
     let tooltip = format!(
         "WorkBuddyBar · 可用积分 {} · 今日扣费 {} · 账号 {}/{}",
@@ -864,6 +991,9 @@ fn update_tray(app: &AppHandle, snapshot: &AppSnapshot) {
     } else {
         "normal"
     };
+    #[cfg(target_os = "macos")]
+    let _ = tray.set_icon_with_as_template(Some(tray_image(kind)), true);
+    #[cfg(not(target_os = "macos"))]
     let _ = tray.set_icon(Some(tray_image(kind)));
 }
 
@@ -1048,6 +1178,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(tray_image("normal"))
+        .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -1185,6 +1316,7 @@ fn get_settings(app: AppHandle, state: State<'_, AppState>) -> Result<SettingsVi
         refresh_interval_sec: config.refresh_interval_sec,
         low_credit_threshold: config.low_credit_threshold,
         launch_at_login: config.launch_at_login,
+        key_usage_names: config.key_usage_names,
         config_path: config_path(&app)
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default(),
@@ -1218,6 +1350,7 @@ async fn save_settings(
     config.refresh_interval_sec = interval;
     config.low_credit_threshold = threshold;
     config.launch_at_login = settings.launch_at_login;
+    config.key_usage_names = normalize_key_usage_names(settings.key_usage_names);
     save_config(&app, &config)?;
     state.set_config(config.clone());
     apply_autostart(&app, config.launch_at_login)?;
@@ -1236,6 +1369,37 @@ fn open_settings(app: AppHandle) -> Result<(), String> {
     window.center().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn resize_popover(app: AppHandle, height: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window("popover")
+        .ok_or_else(|| "弹层窗口不存在".to_string())?;
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let size = window.outer_size().map_err(|error| error.to_string())?;
+    let logical_size = size.to_logical::<f64>(scale);
+    let max_height = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| monitor.work_area().size.height as f64 / monitor.scale_factor() - 16.0)
+        .unwrap_or(1000.0)
+        .max(320.0);
+    let target_height = height.clamp(320.0, max_height);
+    let position = window.outer_position().ok();
+
+    window
+        .set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+            logical_size.width,
+            target_height,
+        )))
+        .map_err(|error| error.to_string())?;
+
+    if let Some(position) = position {
+        let _ = window.set_position(Position::Physical(position));
+    }
     Ok(())
 }
 
@@ -1323,23 +1487,6 @@ pub fn run() {
 
             setup_tray(app)?;
 
-            // TODO(临时调试): 打印显示器与托盘坐标，定位弹层偏移问题后删除
-            #[cfg(debug_assertions)]
-            {
-                if let Ok(Some(monitor)) = app.primary_monitor() {
-                    println!(
-                        "[debug] primary pos={:?} size={:?} work_area={:?} scale={}",
-                        monitor.position(),
-                        monitor.size(),
-                        monitor.work_area(),
-                        monitor.scale_factor()
-                    );
-                }
-                if let Some(tray) = app.tray_by_id(TRAY_ID) {
-                    println!("[debug] tray rect={:?}", tray.rect());
-                }
-            }
-
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("popover") {
                 let _ = window_vibrancy::apply_vibrancy(
@@ -1381,6 +1528,7 @@ pub fn run() {
             get_settings,
             save_settings,
             open_settings,
+            resize_popover,
             open_manager,
             quit_app
         ])
@@ -1473,6 +1621,50 @@ mod tests {
         assert_eq!(synced, 2);
         assert!(!partial);
         assert_eq!(total, Some(6482.0));
+    }
+
+    #[test]
+    fn parses_key_usage_and_sorts() {
+        let keys = json!([
+            {"id": 1, "name": "alpha", "prefix": "sk-a", "enabled": true, "used_tokens": "1500000"},
+            {"id": 2, "name": "beta", "prefix": "sk-b", "enabled": 0, "used_tokens": 500000},
+            {"id": 3, "name": "gamma", "prefix": "sk-g", "enabled": true, "used_tokens": 200}
+        ]);
+        let today = json!([
+            {"name": "alpha", "prompt_tokens": "1000000", "completion_tokens": 230000},
+            {"name": "beta", "prompt_tokens": 1000, "completion_tokens": 2000}
+        ]);
+
+        let rows = parse_key_usage(&keys, &today, None);
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].name, "alpha");
+        assert_eq!(rows[0].today_tokens, 1_230_000);
+        assert_eq!(rows[0].total_tokens, 1_500_000);
+        assert_eq!(rows[1].name, "gamma");
+        assert_eq!(rows[1].today_tokens, 0);
+        assert_eq!(rows[2].name, "beta");
+        assert!(!rows[2].enabled);
+    }
+
+    #[test]
+    fn filters_key_usage_by_configured_names() {
+        let keys = json!([
+            {"id": 1, "name": "alpha", "prefix": "sk-a", "enabled": true, "used_tokens": 10},
+            {"id": 2, "name": "beta", "prefix": "sk-b", "enabled": true, "used_tokens": 20}
+        ]);
+        let today = json!([
+            {"name": "alpha", "prompt_tokens": 1, "completion_tokens": 2},
+            {"name": "beta", "prompt_tokens": 3, "completion_tokens": 4}
+        ]);
+        let allowed = vec!["beta".to_string()];
+
+        let rows = parse_key_usage(&keys, &today, Some(&allowed));
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "beta");
+        assert_eq!(rows[0].today_tokens, 7);
+        assert_eq!(rows[0].total_tokens, 20);
     }
 
     #[test]

@@ -18,12 +18,6 @@ export function formatInteger(value: number | null | undefined): string {
   return integerFormatter.format(value);
 }
 
-export function formatCompact(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  if (Math.abs(value) >= 100000) return `${(value / 1000).toFixed(1)}k`;
-  return numberFormatter.format(value);
-}
-
 export function formatTokens(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(2)}M`;

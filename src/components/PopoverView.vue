@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppSnapshot } from "../types";
 import {
   accountStatusLabel,
   accountStatusTone,
-  formatCompact,
   formatCredits,
   formatInteger,
   formatRelativeTime,
@@ -14,12 +13,13 @@ import {
   formatTokens,
   realmLabel,
 } from "../lib/format";
-import Sparkline from "./Sparkline.vue";
 
 const snapshot = ref<AppSnapshot | null>(null);
 const refreshing = ref(false);
 const actionError = ref("");
+const content = ref<HTMLElement | null>(null);
 let unlisten: UnlistenFn | undefined;
+let resizeTimer = 0;
 
 const healthyCount = computed(
   () => snapshot.value?.accounts.filter((account) => account.status === "healthy").length ?? 0,
@@ -41,6 +41,36 @@ const statusText = computed(() => {
   return "运行正常";
 });
 const lastUpdated = computed(() => formatRelativeTime(snapshot.value?.updatedAt));
+const monthUsage = computed(() =>
+  (snapshot.value?.usageDays ?? []).reduce(
+    (total, day) => ({
+      tokens: total.tokens + day.tokens,
+      credit: total.credit + day.credit,
+    }),
+    { tokens: 0, credit: 0 },
+  ),
+);
+const keyUsageTotal = computed(() =>
+  (snapshot.value?.keyUsage ?? []).reduce(
+    (total, key) => ({
+      todayTokens: total.todayTokens + key.todayTokens,
+      totalTokens: total.totalTokens + key.totalTokens,
+    }),
+    { todayTokens: 0, totalTokens: 0 },
+  ),
+);
+
+async function resizeToContent() {
+  await nextTick();
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(async () => {
+    const element = content.value;
+    if (!element) return;
+
+    const height = Math.ceil(element.getBoundingClientRect().height + 28);
+    await invoke("resize_popover", { height });
+  }, 0);
+}
 
 async function load() {
   try {
@@ -80,16 +110,23 @@ async function logout() {
 
 onMounted(async () => {
   await load();
+  await resizeToContent();
   unlisten = await listen<AppSnapshot>("snapshot-changed", (event) => {
     snapshot.value = event.payload;
   });
 });
 
-onUnmounted(() => unlisten?.());
+watch([snapshot, actionError, refreshing], resizeToContent, { deep: true });
+
+onUnmounted(() => {
+  window.clearTimeout(resizeTimer);
+  unlisten?.();
+});
 </script>
 
 <template>
   <main class="popover-page">
+    <div ref="content" class="popover-content">
     <header class="popover-header" data-tauri-drag-region>
       <div class="mini-brand" data-tauri-drag-region>
         <img src="/workbuddy.png" alt="" />
@@ -98,9 +135,12 @@ onUnmounted(() => unlisten?.());
           <span :class="['status-dot', statusTone]" data-tauri-drag-region>{{ statusText }}</span>
         </div>
       </div>
-      <button class="icon-button" type="button" :disabled="refreshing" title="刷新" @click="refresh">
-        <svg viewBox="0 0 24 24" :class="{ spinning: refreshing }"><path d="M20 11a8.1 8.1 0 0 0-14.9-3M4 5v4h4M4 13a8.1 8.1 0 0 0 14.9 3M20 19v-4h-4" /></svg>
-      </button>
+      <div class="header-actions">
+        <span v-if="snapshot?.username" class="current-user" :title="snapshot.username">{{ snapshot.username }}</span>
+        <button class="icon-button" type="button" :disabled="refreshing" title="刷新" @click="refresh">
+          <svg viewBox="0 0 24 24" :class="{ spinning: refreshing }"><path d="M20 11a8.1 8.1 0 0 0-14.9-3M4 5v4h4M4 13a8.1 8.1 0 0 0 14.9 3M20 19v-4h-4" /></svg>
+        </button>
+      </div>
     </header>
 
     <section class="hero-card" :class="statusTone">
@@ -119,7 +159,6 @@ onUnmounted(() => unlisten?.());
     <section class="section-card usage-card">
       <div class="section-title">
         <h2>今日用量</h2>
-        <span v-if="snapshot?.today.topModel">{{ snapshot.today.topModel }}</span>
       </div>
       <div class="metric-grid">
         <div>
@@ -138,12 +177,46 @@ onUnmounted(() => unlisten?.());
       <div class="week-line">
         <span>近 7 天</span>
         <b>{{ formatCredits(snapshot?.today.weekCredit) }} 积分</b>
-        <span>{{ formatCompact(snapshot?.today.weekTokens) }} Tokens</span>
+        <span>{{ formatTokens(snapshot?.today.weekTokens) }} Tokens</span>
+      </div>
+      <div class="week-line month-line">
+        <span>近 30 天</span>
+        <b>{{ formatCredits(monthUsage.credit) }} 积分</b>
+        <span>{{ formatTokens(monthUsage.tokens) }} Tokens</span>
       </div>
     </section>
 
-    <section class="section-card trend-card">
-      <Sparkline :points="snapshot?.usageDays ?? []" />
+    <section v-if="snapshot?.showKeyUsage" class="section-card keys-card">
+      <div class="section-title">
+        <h2>密钥用量</h2>
+        <span>{{ snapshot?.keyUsage.length ?? 0 }} 个</span>
+      </div>
+      <template v-if="snapshot?.keyUsage.length">
+        <div class="key-usage-head">
+          <span>密钥</span>
+          <span>今日</span>
+          <span>累计</span>
+        </div>
+        <div class="key-usage-total">
+          <span>全部密钥</span>
+          <b>{{ formatTokens(keyUsageTotal.todayTokens) }}</b>
+          <b>{{ formatTokens(keyUsageTotal.totalTokens) }}</b>
+        </div>
+        <div class="key-usage-list">
+          <div
+            v-for="key in snapshot.keyUsage"
+            :key="key.id"
+            :class="['key-usage-row', { disabled: !key.enabled }]"
+          >
+            <div class="key-usage-main">
+              <span>{{ key.name }}</span>
+            </div>
+            <b>{{ formatTokens(key.todayTokens) }}</b>
+            <b>{{ formatTokens(key.totalTokens) }}</b>
+          </div>
+        </div>
+      </template>
+      <div v-else class="empty-state">暂无密钥用量</div>
     </section>
 
     <section class="section-card accounts-card">
@@ -189,5 +262,6 @@ onUnmounted(() => unlisten?.());
         退出登录
       </button>
     </footer>
+    </div>
   </main>
 </template>

@@ -8,17 +8,22 @@ const saving = ref(false);
 const saved = ref(false);
 const error = ref("");
 const settings = ref<SettingsView | null>(null);
+const keyUsageNamesText = ref("");
 const form = ref({
   baseUrl: "http://47.99.55.3:7864",
   username: "",
   password: "",
-  refreshIntervalSec: 60,
+  refreshIntervalSec: 120,
   lowCreditThreshold: 1000,
   launchAtLogin: false,
 });
 const showPassword = ref(false);
 
 const isHttp = computed(() => form.value.baseUrl.trim().toLowerCase().startsWith("http://"));
+
+function parseKeyUsageNames(raw: string): string[] {
+  return [...new Set(raw.split("&&").map((name) => name.trim()).filter(Boolean))];
+}
 
 async function load() {
   loading.value = true;
@@ -33,6 +38,7 @@ async function load() {
       lowCreditThreshold: value.lowCreditThreshold,
       launchAtLogin: value.launchAtLogin,
     };
+    keyUsageNamesText.value = value.keyUsageNames.join("&&");
   } catch (reason) {
     error.value = String(reason);
   } finally {
@@ -45,7 +51,12 @@ async function save() {
   saved.value = false;
   error.value = "";
   try {
-    await invoke<AppSnapshot>("save_settings", { settings: form.value });
+    await invoke<AppSnapshot>("save_settings", {
+      settings: {
+        ...form.value,
+        keyUsageNames: parseKeyUsageNames(keyUsageNamesText.value),
+      },
+    });
     saved.value = true;
     await load();
     window.setTimeout(() => (saved.value = false), 1800);
@@ -118,6 +129,11 @@ onMounted(load);
         <label>
           <span>低积分界面阈值</span>
           <input v-model.number="form.lowCreditThreshold" type="number" min="0" step="100" required />
+        </label>
+        <label>
+          <span>展示的密钥名称</span>
+          <input v-model="keyUsageNamesText" type="text" placeholder="例如：公司Mac&&cc-switch" />
+          <small>仅非管理员生效；多个名称用 && 分隔，留空则不展示密钥用量。</small>
         </label>
         <label class="switch-row">
           <span>

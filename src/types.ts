@@ -41,11 +41,21 @@ export interface UsagePoint {
   failed: number;
 }
 
+export interface KeyUsageView {
+  id: number;
+  name: string;
+  prefix: string;
+  enabled: boolean;
+  todayTokens: number;
+  totalTokens: number;
+}
+
 export interface AppSnapshot {
   updatedAt: number;
   lastSuccessAt: number;
   stale: boolean;
   authState: AuthState;
+  username: string;
   poolAvailable: boolean;
   poolSynced: number;
   accountTotal: number;
@@ -56,6 +66,9 @@ export interface AppSnapshot {
   accounts: AccountView[];
   today: UsageSummary;
   usageDays: UsagePoint[];
+  isAdmin: boolean;
+  showKeyUsage: boolean;
+  keyUsage: KeyUsageView[];
   error: string | null;
 }
 
@@ -66,5 +79,6 @@ export interface SettingsView {
   refreshIntervalSec: number;
   lowCreditThreshold: number;
   launchAtLogin: boolean;
+  keyUsageNames: string[];
   configPath: string;
 }
