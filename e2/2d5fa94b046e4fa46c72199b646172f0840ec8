@@ -1,0 +1,69 @@
+src-tauri/Cargo.toml
+  s_8548821b4a3aca::t_e14cd54d9ec1e6 13
+src/types.ts
+  s_8548821b4a3aca::t_bb0e68802b63ea 69
+  s_8548821b4a3aca::t_c91c05fd812e9d 58
+  s_8548821b4a3aca::t_a2d95b938d7ccb 44-52,70-71,82
+src/style.css
+  s_8548821b4a3aca::t_e88932ee4bfc15 405,413,849
+  s_8548821b4a3aca::t_a374e74b4231ae 248-252
+  s_8548821b4a3aca::t_c91c05fd812e9d 285-303,557,564,566
+  s_8548821b4a3aca::t_abd41a9a125bbf 493-498,501-505,508-509,512-532,538,542,547,551,555,559-562,567,570,572-575
+  s_8548821b4a3aca::t_3b2dd965038ec6 749
+  s_8548821b4a3aca::t_0f73364fae23ad 492,533-537,539-541,543-546,548-550,552-554,556,558,563,565,568-569,571
+src/components/SettingsView.vue
+  s_8548821b4a3aca::t_3b2dd965038ec6 133-134,137
+  s_8548821b4a3aca::t_21ac8922d1915f 16
+  s_8548821b4a3aca::t_7da8add6e947a8 25,41,135-136
+  s_8548821b4a3aca::t_2aa7b3c7dc7b5c 11,24,26-27,54-59
+src-tauri/src/lib.rs
+  s_8548821b4a3aca::t_b71c1581191652 1626-1637,1639-1650
+  s_8548821b4a3aca::t_a374e74b4231ae 88,600,1376-1405,1531
+  s_8548821b4a3aca::t_f4194b21eca6a1 1651-1669
+  s_8548821b4a3aca::t_893b2769a634bc 745-746,748
+  s_8548821b4a3aca::t_fa4cec36ecb225 34-35,48,129,153-154,169,182-183,261-272,301,358-369,549-588
+  s_8548821b4a3aca::t_c91c05fd812e9d 117,141,756
+  s_8548821b4a3aca::t_5b845bec993b87 734-735,768-774,1319,1353,1638
+  s_8548821b4a3aca::t_e14cd54d9ec1e6 893-909,960
+  s_8548821b4a3aca::t_21ac8922d1915f 45
+  s_8548821b4a3aca::t_bb0e68802b63ea 128,152,733,736-742,767,775-777
+  s_8548821b4a3aca::t_54de9edae20768 744,747
+  s_8548821b4a3aca::t_c93101449aa2d2 994-996,1181
+  s_8548821b4a3aca::t_7a171e5b1bded6 5,79-87,89,130,589-599,601,1375
+src-tauri/build.rs
+  s_8548821b4a3aca::t_e14cd54d9ec1e6 2-11
+src-tauri/src/macos_tray.m
+  s_8548821b4a3aca::t_52d5afe1d1a535 37
+  s_8548821b4a3aca::t_e14cd54d9ec1e6 1-2,23-33,38-40
+  s_8548821b4a3aca::t_3fb1bcf3570351 3-22,34-36
+src/components/PopoverView.vue
+  s_8548821b4a3aca::t_26738c443c2049 50,182-185
+  s_8548821b4a3aca::t_abd41a9a125bbf 53-61,181,190-219
+  s_8548821b4a3aca::t_a374e74b4231ae 2,20,63-64,67-71,73,113,119-121,123-124,129,265
+  s_8548821b4a3aca::t_75dd13fcecafd4 44-49,51-52,180
+  s_8548821b4a3aca::t_f385951ee65dc5 22,65-66,72,122
+  s_8548821b4a3aca::t_c91c05fd812e9d 138-143
+  s_8548821b4a3aca::t_d363f085d5f9ae 62,189
+src-tauri/tauri.conf.json
+  s_8548821b4a3aca::t_c91c05fd812e9d 47,49,51
+  s_8548821b4a3aca::t_e88932ee4bfc15 34
+  s_8548821b4a3aca::t_f343e8a8c5dfc0 48,50,52
+src-tauri/Cargo.lock
+  s_8548821b4a3aca::t_df1480986c230c 5177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "e22d5fa94b046e4fa46c72199b646172f0840ec8",
+  "prompts": {},
+  "sessions": {
+    "s_8548821b4a3aca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c371-9530-7080-9939-8e7e53776369",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
