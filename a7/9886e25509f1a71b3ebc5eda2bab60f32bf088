@@ -1,0 +1,22 @@
+src/style.css
+  s_8548821b4a3aca::t_ca1d9b69e3401b 606-607,609-613
+  s_8548821b4a3aca::t_3b35c62c789607 579
+src-tauri/tauri.conf.json
+  s_8548821b4a3aca::t_ca1d9b69e3401b 48,50,52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "a79886e25509f1a71b3ebc5eda2bab60f32bf088",
+  "prompts": {},
+  "sessions": {
+    "s_8548821b4a3aca": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c371-9530-7080-9939-8e7e53776369",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
