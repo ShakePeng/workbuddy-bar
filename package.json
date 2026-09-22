@@ -6,15 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "check": "vue-tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "verify": "vue-tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:macos": "tauri build --target aarch64-apple-darwin --bundles dmg",
     "tauri:build:windows": "tauri build --bundles nsis",
-    "dmg": "tauri build --target aarch64-apple-darwin --bundles dmg && cp -f src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg .",
     "icon": "tauri icon src-tauri/icons/app-source.png"
   },
   "dependencies": {
