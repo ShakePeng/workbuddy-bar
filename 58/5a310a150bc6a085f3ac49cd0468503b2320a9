@@ -1,0 +1,27 @@
+src-tauri/src/lib.rs
+  s_36d36b85ea9b6c::t_d85c12e04c9661 963,1729,1733,1737
+  s_36d36b85ea9b6c::t_55367d4c80b173 23,28-29,44,287-299,311-312,315,317-323,326-328,330-336,957-962,1000,1005-1006,1724-1728,1730-1732,1734-1736,1738-1755
+  s_36d36b85ea9b6c::t_32a1709204f3fc 329
+  s_36d36b85ea9b6c::t_488de2550fda2d 964-965,1756
+src-tauri/src/macos_tray.m
+  s_36d36b85ea9b6c::t_b0b13555001867 3-62,81,92,105
+  s_36d36b85ea9b6c::t_97248ac0ea67fa 66-68,83-84,86-89,91,93-97,99-104,106-108,110,114-116
+  s_36d36b85ea9b6c::t_7c1c939030431e 98
+  s_36d36b85ea9b6c::t_f6751407395e6c 69-80,82,85,90,111-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "585a310a150bc6a085f3ac49cd0468503b2320a9",
+  "prompts": {},
+  "sessions": {
+    "s_36d36b85ea9b6c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d146-7263-7690-bbae-54de79f513f8",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
