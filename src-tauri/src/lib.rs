@@ -1,7 +1,6 @@
-use reqwest::header::{HeaderMap, COOKIE, SET_COOKIE};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -19,8 +18,7 @@ use url::Url;
 
 const TRAY_ID: &str = "workbuddybar";
 const EVENT_SNAPSHOT: &str = "snapshot-changed";
-const DEFAULT_BASE_URL: &str = "http://47.99.55.3:7864";
-const CONFIG_VERSION: u32 = 2;
+const CONFIG_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,28 +26,24 @@ struct AppConfig {
     #[serde(default)]
     config_version: u32,
     base_url: String,
-    username: String,
-    password: String,
-    session_cookie: String,
+    // 管理端访问令牌（wbt_ 前缀），以 Authorization: Bearer 透传。
+    // 老版本配置里没有这个字段，必须给默认值，否则升级时整份配置解析失败、地址被丢。
+    #[serde(default)]
+    token: String,
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
-    #[serde(default)]
-    key_usage_names: Vec<String>,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             config_version: CONFIG_VERSION,
-            base_url: DEFAULT_BASE_URL.to_string(),
-            username: String::new(),
-            password: String::new(),
-            session_cookie: String::new(),
+            base_url: String::new(),
+            token: String::new(),
             refresh_interval_sec: 120,
             low_credit_threshold: 1000.0,
             launch_at_login: false,
-            key_usage_names: Vec::new(),
         }
     }
 }
@@ -130,7 +124,6 @@ struct AppSnapshot {
     today: UsageSummary,
     usage_days: Vec<UsagePoint>,
     is_admin: bool,
-    show_key_usage: bool,
     key_usage: Vec<KeyUsageView>,
     error: Option<String>,
 }
@@ -154,7 +147,6 @@ impl Default for AppSnapshot {
             today: UsageSummary::default(),
             usage_days: Vec::new(),
             is_admin: false,
-            show_key_usage: false,
             key_usage: Vec::new(),
             error: None,
         }
@@ -165,12 +157,10 @@ impl Default for AppSnapshot {
 #[serde(rename_all = "camelCase")]
 struct SettingsView {
     base_url: String,
-    username: String,
-    password: String,
+    token: String,
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
-    key_usage_names: Vec<String>,
     config_path: String,
 }
 
@@ -178,27 +168,22 @@ struct SettingsView {
 #[serde(rename_all = "camelCase")]
 struct SettingsInput {
     base_url: String,
-    username: String,
-    password: String,
+    token: String,
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
-    #[serde(default)]
-    key_usage_names: Vec<String>,
 }
 
 #[derive(Debug)]
 enum ApiError {
     AuthExpired,
-    Rejected(String),
     Message(String),
 }
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::AuthExpired => write!(f, "登录状态已失效"),
-            Self::Rejected(message) => write!(f, "{message}"),
+            Self::AuthExpired => write!(f, "访问令牌已失效，请重新填写"),
             Self::Message(message) => write!(f, "{message}"),
         }
     }
@@ -262,16 +247,9 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn normalize_key_usage_names(names: Vec<String>) -> Vec<String> {
-    let mut normalized = Vec::new();
-    for raw in names {
-        let name = raw.trim();
-        if name.is_empty() || normalized.iter().any(|existing| existing == name) {
-            continue;
-        }
-        normalized.push(name.to_string());
-    }
-    normalized
+fn display_username(raw: &str) -> String {
+    // 令牌鉴权时管理端返回 `token:<令牌名>`；界面上只显示令牌名本身。
+    raw.strip_prefix("token:").unwrap_or(raw).to_string()
 }
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -310,11 +288,6 @@ fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
         serde_json::from_slice(&bytes).map_err(|error| format!("配置格式错误：{error}"))?;
     let mut changed = migrate_config(&mut config);
 
-    if config.base_url.trim().is_empty() {
-        config.base_url = DEFAULT_BASE_URL.to_string();
-        changed = true;
-    }
-
     let refresh_interval_sec = config.refresh_interval_sec.clamp(30, 600);
     if refresh_interval_sec != config.refresh_interval_sec {
         config.refresh_interval_sec = refresh_interval_sec;
@@ -323,12 +296,6 @@ fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
 
     if !config.low_credit_threshold.is_finite() || config.low_credit_threshold < 0.0 {
         config.low_credit_threshold = 1000.0;
-        changed = true;
-    }
-
-    let key_usage_names = normalize_key_usage_names(config.key_usage_names.clone());
-    if key_usage_names != config.key_usage_names {
-        config.key_usage_names = key_usage_names;
         changed = true;
     }
 
@@ -582,11 +549,7 @@ fn parse_usage_days(value: &Value) -> Vec<UsagePoint> {
     points
 }
 
-fn parse_key_usage(
-    keys: &Value,
-    today: &Value,
-    allowed_names: Option<&[String]>,
-) -> Vec<KeyUsageView> {
+fn parse_key_usage(keys: &Value, today: &Value) -> Vec<KeyUsageView> {
     let mut today_by_name: HashMap<String, u64> = HashMap::new();
     for row in today.as_array().into_iter().flatten() {
         let name = value_string(row.get("name"));
@@ -606,22 +569,16 @@ fn parse_key_usage(
             } else {
                 raw_name
             };
-            if let Some(allowed_names) = allowed_names {
-                if !allowed_names.iter().any(|allowed| allowed == &name) {
-                    return None;
-                }
-            }
             let today_tokens = today_by_name.get(&name).copied().unwrap_or(0);
-            Some(KeyUsageView {
+            KeyUsageView {
                 id,
                 name,
                 prefix: value_string(key.get("prefix")),
                 enabled: value_bool(key.get("enabled")).unwrap_or(true),
                 today_tokens,
                 total_tokens: value_u64(key.get("used_tokens")),
-            })
+            }
         })
-        .flatten()
         .collect();
 
     key_usage.sort_by(|left, right| {
@@ -654,7 +611,7 @@ fn api_message(status: StatusCode, raw: &str) -> String {
             }
         });
     if status == StatusCode::UNAUTHORIZED {
-        return format!("登录失败：{detail}");
+        return format!("访问令牌无效：{detail}");
     }
     if status == StatusCode::TOO_MANY_REQUESTS {
         return format!("请求过于频繁：{detail}");
@@ -662,59 +619,10 @@ fn api_message(status: StatusCode, raw: &str) -> String {
     format!("管理端返回 {status}：{detail}")
 }
 
-fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
-    for value in headers.get_all(SET_COOKIE) {
-        let Ok(raw) = value.to_str() else {
-            continue;
-        };
-        for part in raw.split(';') {
-            if let Some(cookie) = part.trim().strip_prefix("wb_session=") {
-                if !cookie.is_empty() {
-                    return Some(cookie.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-async fn api_login(
-    client: &Client,
-    base_url: &str,
-    username: &str,
-    password: &str,
-) -> Result<String, ApiError> {
-    let response = client
-        .post(format!("{base_url}/api/login"))
-        .json(&json!({ "username": username, "password": password }))
-        .send()
-        .await
-        .map_err(|error| ApiError::Message(format!("无法连接管理端：{error}")))?;
-
-    let status = response.status();
-    let headers = response.headers().clone();
-    let body = response
-        .text()
-        .await
-        .map_err(|error| ApiError::Message(format!("读取登录响应失败：{error}")))?;
-
-    if !status.is_success() {
-        let message = api_message(status, &body);
-        return if status == StatusCode::UNAUTHORIZED || status == StatusCode::TOO_MANY_REQUESTS {
-            Err(ApiError::Rejected(message))
-        } else {
-            Err(ApiError::Message(message))
-        };
-    }
-
-    extract_session_cookie(&headers)
-        .ok_or_else(|| ApiError::Message("管理端未返回 wb_session 会话".into()))
-}
-
 async fn get_json(client: &Client, config: &AppConfig, path: &str) -> Result<Value, ApiError> {
     let mut request = client.get(format!("{}{}", config.base_url, path));
-    if !config.session_cookie.is_empty() {
-        request = request.header(COOKIE, format!("wb_session={}", config.session_cookie));
+    if !config.token.is_empty() {
+        request = request.bearer_auth(&config.token);
     }
     let response = request
         .send()
@@ -738,8 +646,8 @@ async fn get_json(client: &Client, config: &AppConfig, path: &str) -> Result<Val
 
 async fn post_json(client: &Client, config: &AppConfig, path: &str) -> Result<Value, ApiError> {
     let mut request = client.post(format!("{}{}", config.base_url, path));
-    if !config.session_cookie.is_empty() {
-        request = request.header(COOKIE, format!("wb_session={}", config.session_cookie));
+    if !config.token.is_empty() {
+        request = request.bearer_auth(&config.token);
     }
     let response = request
         .send()
@@ -767,15 +675,8 @@ async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapsh
     let summary = get_json(client, config, "/api/stats/summary").await?;
     let daily = get_json(client, config, "/api/stats/daily?days=30").await?;
     let is_admin = me.get("role").and_then(Value::as_str) == Some("admin");
-    let show_key_usage = is_admin || !config.key_usage_names.is_empty();
-    let (keys, key_today) = if show_key_usage {
-        (
-            get_json(client, config, "/api/keys").await?,
-            get_json(client, config, "/api/stats/by-key?days=1").await?,
-        )
-    } else {
-        (json!([]), json!([]))
-    };
+    let keys = get_json(client, config, "/api/keys").await?;
+    let key_today = get_json(client, config, "/api/stats/by-key?days=1").await?;
 
     let (mut parsed_accounts, enabled_accounts, _, _, _) = parse_accounts(&accounts);
     let realtime_credits =
@@ -789,7 +690,7 @@ async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapsh
         last_success_at: now,
         stale: false,
         auth_state: "ok".into(),
-        username: value_string(me.get("username")),
+        username: display_username(&value_string(me.get("username"))),
         pool_available: value_bool(accounts.get("pool_available")).unwrap_or(false),
         pool_synced: value_u64(accounts.get("pool_synced")),
         account_total: value_u64(accounts.get("total")).max(parsed_accounts.len() as u64),
@@ -801,16 +702,7 @@ async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapsh
         today: parse_usage_summary(&summary),
         usage_days: parse_usage_days(&daily),
         is_admin,
-        show_key_usage,
-        key_usage: if show_key_usage {
-            parse_key_usage(
-                &keys,
-                &key_today,
-                (!is_admin).then_some(config.key_usage_names.as_slice()),
-            )
-        } else {
-            Vec::new()
-        },
+        key_usage: parse_key_usage(&keys, &key_today),
         error: None,
     })
 }
@@ -842,9 +734,9 @@ fn publish_error(app: &AppHandle, error: impl Into<String>) {
 
 async fn refresh_state(app: &AppHandle) -> AppSnapshot {
     let state = app.state::<AppState>();
-    let mut config = state.config();
+    let config = state.config();
 
-    if config.username.trim().is_empty() || config.password.is_empty() {
+    if config.token.trim().is_empty() {
         let mut snapshot = AppSnapshot::default();
         snapshot.updated_at = now_secs();
         state.set_snapshot(snapshot.clone());
@@ -853,62 +745,16 @@ async fn refresh_state(app: &AppHandle) -> AppSnapshot {
         return snapshot;
     }
 
-    if config.session_cookie.is_empty() {
-        match api_login(
-            &state.http,
-            &config.base_url,
-            &config.username,
-            &config.password,
-        )
-        .await
-        {
-            Ok(cookie) => {
-                config.session_cookie = cookie;
-                let _ = save_config(app, &config);
-                state.set_config(config.clone());
-            }
-            Err(error) => {
-                publish_error(app, error.to_string());
-                return state.snapshot();
-            }
-        }
-    }
-
     match fetch_snapshot(&state.http, &config).await {
         Ok(snapshot) => {
             publish(app, snapshot);
             state.snapshot()
         }
+        // 令牌被删除、过期或管理端重置了密钥：直接把登录窗口叫回来让用户重填。
         Err(ApiError::AuthExpired) => {
-            match api_login(
-                &state.http,
-                &config.base_url,
-                &config.username,
-                &config.password,
-            )
-            .await
-            {
-                Ok(cookie) => {
-                    config.session_cookie = cookie;
-                    let _ = save_config(app, &config);
-                    state.set_config(config.clone());
-                    match fetch_snapshot(&state.http, &config).await {
-                        Ok(snapshot) => {
-                            publish(app, snapshot);
-                            state.snapshot()
-                        }
-                        Err(error) => {
-                            publish_error(app, error.to_string());
-                            state.snapshot()
-                        }
-                    }
-                }
-                Err(error) => {
-                    publish_error(app, error.to_string());
-                    present_login(app);
-                    state.snapshot()
-                }
-            }
+            publish_error(app, "访问令牌已失效，请重新填写");
+            present_login(app);
+            state.snapshot()
         }
         Err(error) => {
             publish_error(app, error.to_string());
@@ -1294,30 +1140,29 @@ fn load_state(state: State<'_, AppState>) -> AppSnapshot {
 }
 
 #[tauri::command]
-async fn login(
-    app: AppHandle,
-    base_url: String,
-    username: String,
-    password: String,
-) -> Result<AppSnapshot, String> {
+async fn login(app: AppHandle, base_url: String, token: String) -> Result<AppSnapshot, String> {
     let base_url = normalize_base_url(&base_url)?;
-    let username = username.trim().to_string();
-    if username.is_empty() {
-        return Err("请输入账号".into());
-    }
-    if password.is_empty() {
-        return Err("请输入密码".into());
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Err("请输入访问令牌".into());
     }
 
     let state = app.state::<AppState>();
-    let cookie = api_login(&state.http, &base_url, &username, &password)
-        .await
-        .map_err(String::from)?;
+    // 先拿 /api/me 验活：令牌错了就当场报错，不把无效令牌写进配置。
+    let mut probe = state.config();
+    probe.base_url = base_url.clone();
+    probe.token = token.clone();
+    match get_json(&state.http, &probe, "/api/me").await {
+        Ok(_) => {}
+        Err(ApiError::AuthExpired) => {
+            return Err("访问令牌无效或已过期，请在管理端重新创建".into())
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+
     let mut config = state.config();
     config.base_url = base_url;
-    config.username = username;
-    config.password = password;
-    config.session_cookie = cookie;
+    config.token = token;
     save_config(&app, &config)?;
     state.set_config(config);
 
@@ -1341,9 +1186,7 @@ async fn login(
 #[tauri::command]
 fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let mut config = state.config();
-    config.session_cookie.clear();
-    config.username.clear();
-    config.password.clear();
+    config.token.clear();
     save_config(&app, &config)?;
     state.set_config(config);
     let mut snapshot = AppSnapshot::default();
@@ -1365,12 +1208,10 @@ fn get_settings(app: AppHandle, state: State<'_, AppState>) -> Result<SettingsVi
     let config = state.config();
     Ok(SettingsView {
         base_url: config.base_url,
-        username: config.username,
-        password: config.password,
+        token: config.token,
         refresh_interval_sec: config.refresh_interval_sec,
         low_credit_threshold: config.low_credit_threshold,
         launch_at_login: config.launch_at_login,
-        key_usage_names: config.key_usage_names,
         config_path: config_path(&app)
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default(),
@@ -1392,19 +1233,11 @@ async fn save_settings(
     };
 
     let mut config = state.config();
-    let credentials_changed = config.base_url != base_url
-        || config.username != settings.username.trim()
-        || config.password != settings.password;
-    if credentials_changed {
-        config.session_cookie.clear();
-    }
     config.base_url = base_url;
-    config.username = settings.username.trim().to_string();
-    config.password = settings.password;
+    config.token = settings.token.trim().to_string();
     config.refresh_interval_sec = interval;
     config.low_credit_threshold = threshold;
     config.launch_at_login = settings.launch_at_login;
-    config.key_usage_names = normalize_key_usage_names(settings.key_usage_names);
     save_config(&app, &config)?;
     state.set_config(config.clone());
     apply_autostart(&app, config.launch_at_login)?;
@@ -1551,7 +1384,7 @@ pub fn run() {
                 );
             }
 
-            if config.username.trim().is_empty() || config.password.is_empty() {
+            if config.token.trim().is_empty() {
                 present_login(app.handle());
             } else {
                 let handle = app.handle().clone();
@@ -1601,7 +1434,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::header::{HeaderMap, HeaderValue};
+    use serde_json::json;
 
     #[test]
     fn normalizes_base_url() {
@@ -1613,13 +1446,10 @@ mod tests {
     }
 
     #[test]
-    fn extracts_session_cookie() {
-        let mut headers = HeaderMap::new();
-        headers.append(
-            SET_COOKIE,
-            HeaderValue::from_static("wb_session=abc123; HttpOnly; Path=/"),
-        );
-        assert_eq!(extract_session_cookie(&headers).as_deref(), Some("abc123"));
+    fn strips_token_prefix_from_username() {
+        assert_eq!(display_username("token:test"), "test");
+        assert_eq!(display_username("admin"), "admin");
+        assert_eq!(display_username(""), "");
     }
 
     #[test]
@@ -1689,7 +1519,7 @@ mod tests {
             {"name": "beta", "prompt_tokens": 1000, "completion_tokens": 2000}
         ]);
 
-        let rows = parse_key_usage(&keys, &today, None);
+        let rows = parse_key_usage(&keys, &today);
 
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].name, "alpha");
@@ -1699,26 +1529,6 @@ mod tests {
         assert_eq!(rows[1].today_tokens, 0);
         assert_eq!(rows[2].name, "beta");
         assert!(!rows[2].enabled);
-    }
-
-    #[test]
-    fn filters_key_usage_by_configured_names() {
-        let keys = json!([
-            {"id": 1, "name": "alpha", "prefix": "sk-a", "enabled": true, "used_tokens": 10},
-            {"id": 2, "name": "beta", "prefix": "sk-b", "enabled": true, "used_tokens": 20}
-        ]);
-        let today = json!([
-            {"name": "alpha", "prompt_tokens": 1, "completion_tokens": 2},
-            {"name": "beta", "prompt_tokens": 3, "completion_tokens": 4}
-        ]);
-        let allowed = vec!["beta".to_string()];
-
-        let rows = parse_key_usage(&keys, &today, Some(&allowed));
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].name, "beta");
-        assert_eq!(rows[0].today_tokens, 7);
-        assert_eq!(rows[0].total_tokens, 20);
     }
 
     #[test]
@@ -1735,6 +1545,34 @@ mod tests {
         snapshot.today.today_credit = 0.0;
         snapshot.total_credits = None;
         assert_eq!(tray_title(&snapshot), "0\n--");
+    }
+
+    #[test]
+    fn migrates_legacy_config_and_drops_credentials() {
+        // 旧版配置里的账号/密码/会话 Cookie/密钥名单必须能被读进来（不报错），
+        // 并在迁移后不再写回磁盘——密码不能继续留在配置文件里。
+        let legacy = r#"{
+            "configVersion": 2,
+            "baseUrl": "http://47.99.55.3:7864",
+            "username": "stats",
+            "password": "secret",
+            "sessionCookie": "abc",
+            "refreshIntervalSec": 120,
+            "lowCreditThreshold": 1000.0,
+            "launchAtLogin": false,
+            "keyUsageNames": ["公司Mac"]
+        }"#;
+        let mut config: AppConfig = serde_json::from_str(legacy).unwrap();
+        assert_eq!(config.base_url, "http://47.99.55.3:7864");
+        assert!(migrate_config(&mut config));
+        assert_eq!(config.config_version, CONFIG_VERSION);
+
+        let written = serde_json::to_string(&config).unwrap();
+        assert!(!written.contains("password"));
+        assert!(!written.contains("sessionCookie"));
+        assert!(!written.contains("username"));
+        assert!(!written.contains("keyUsageNames"));
+        assert!(written.contains(r#""token":"""#));
     }
 
     #[test]

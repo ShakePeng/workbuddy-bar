@@ -8,22 +8,16 @@ const saving = ref(false);
 const saved = ref(false);
 const error = ref("");
 const settings = ref<SettingsView | null>(null);
-const keyUsageNamesText = ref("");
 const form = ref({
-  baseUrl: "http://47.99.55.3:7864",
-  username: "",
-  password: "",
+  baseUrl: "",
+  token: "",
   refreshIntervalSec: 120,
   lowCreditThreshold: 1000,
   launchAtLogin: false,
 });
-const showPassword = ref(false);
+const showToken = ref(false);
 
 const isHttp = computed(() => form.value.baseUrl.trim().toLowerCase().startsWith("http://"));
-
-function parseKeyUsageNames(raw: string): string[] {
-  return [...new Set(raw.split("&&").map((name) => name.trim()).filter(Boolean))];
-}
 
 async function load() {
   loading.value = true;
@@ -32,13 +26,11 @@ async function load() {
     settings.value = value;
     form.value = {
       baseUrl: value.baseUrl,
-      username: value.username,
-      password: value.password,
+      token: value.token,
       refreshIntervalSec: value.refreshIntervalSec,
       lowCreditThreshold: value.lowCreditThreshold,
       launchAtLogin: value.launchAtLogin,
     };
-    keyUsageNamesText.value = value.keyUsageNames.join("&&");
   } catch (reason) {
     error.value = String(reason);
   } finally {
@@ -52,10 +44,7 @@ async function save() {
   error.value = "";
   try {
     await invoke<AppSnapshot>("save_settings", {
-      settings: {
-        ...form.value,
-        keyUsageNames: parseKeyUsageNames(keyUsageNamesText.value),
-      },
+      settings: form.value,
     });
     saved.value = true;
     await load();
@@ -100,24 +89,22 @@ onMounted(load);
           <input v-model="form.baseUrl" type="url" required />
         </label>
         <label>
-          <span>账号</span>
-          <input v-model="form.username" type="text" autocomplete="username" required />
-        </label>
-        <label>
-          <span>密码</span>
+          <span>访问令牌</span>
           <div class="password-field">
             <input
-              v-model="form.password"
-              :type="showPassword ? 'text' : 'password'"
-              autocomplete="current-password"
+              v-model="form.token"
+              :type="showToken ? 'text' : 'password'"
+              autocomplete="off"
+              placeholder="wbt_…"
               required
             />
-            <button type="button" class="text-button" @click="showPassword = !showPassword">
-              {{ showPassword ? "隐藏" : "显示" }}
+            <button type="button" class="text-button" @click="showToken = !showToken">
+              {{ showToken ? "隐藏" : "显示" }}
             </button>
           </div>
+          <small>访问令牌由管理员在管理端创建。</small>
         </label>
-        <p v-if="isHttp" class="security-note">该地址使用明文 HTTP，密码会写入本机配置文件并在网络上明文传输。</p>
+        <p v-if="isHttp" class="security-note">该地址使用明文 HTTP，访问令牌会写入本机配置文件并在网络上明文传输。</p>
       </section>
 
       <section class="settings-section">
@@ -129,11 +116,6 @@ onMounted(load);
         <label>
           <span>低积分界面阈值</span>
           <input v-model.number="form.lowCreditThreshold" type="number" min="0" step="100" required />
-        </label>
-        <label>
-          <span>展示的密钥名称</span>
-          <input v-model="keyUsageNamesText" type="text" placeholder="例如：公司Mac&&cc-switch" />
-          <small>仅非管理员生效；多个名称用 && 分隔，留空则不展示密钥用量。</small>
         </label>
         <label class="switch-row">
           <span>
@@ -147,7 +129,7 @@ onMounted(load);
       <section class="settings-section compact">
         <h2>本地配置</h2>
         <code>{{ settings?.configPath }}</code>
-        <small>配置文件权限限制为 0600，密码与会话 Cookie 不会写入日志。</small>
+        <small>配置文件权限限制为 0600，访问令牌不会写入日志。</small>
       </section>
 
       <p v-if="error" class="form-error">{{ error }}</p>

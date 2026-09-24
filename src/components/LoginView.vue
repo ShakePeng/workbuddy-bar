@@ -3,10 +3,9 @@ import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppSnapshot, SettingsView } from "../types";
 
-const baseUrl = ref("http://47.99.55.3:7864");
-const username = ref("");
-const password = ref("");
-const showPassword = ref(false);
+const baseUrl = ref("");
+const token = ref("");
+const showToken = ref(false);
 const loading = ref(false);
 const error = ref("");
 const initialized = ref(false);
@@ -17,8 +16,7 @@ async function load() {
   try {
     const settings = await invoke<SettingsView>("get_settings");
     baseUrl.value = settings.baseUrl;
-    username.value = settings.username;
-    password.value = settings.password;
+    token.value = settings.token;
   } catch (reason) {
     error.value = String(reason);
   } finally {
@@ -32,8 +30,7 @@ async function submit() {
   try {
     await invoke<AppSnapshot>("login", {
       baseUrl: baseUrl.value,
-      username: username.value,
-      password: password.value,
+      token: token.value,
     });
   } catch (reason) {
     error.value = String(reason);
@@ -61,34 +58,31 @@ onMounted(load);
         <input v-model="baseUrl" type="url" autocomplete="url" placeholder="http://host:port" required />
       </label>
       <label>
-        <span>账号</span>
-        <input v-model="username" type="text" autocomplete="username" placeholder="请输入管理端账号" required />
-      </label>
-      <label>
-        <span>密码</span>
+        <span>访问令牌</span>
         <div class="password-field">
           <input
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            autocomplete="current-password"
-            placeholder="请输入管理端密码"
+            v-model="token"
+            :type="showToken ? 'text' : 'password'"
+            autocomplete="off"
+            placeholder="粘贴管理端创建的访问令牌（wbt_…）"
             required
           />
-          <button type="button" class="text-button" @click="showPassword = !showPassword">
-            {{ showPassword ? "隐藏" : "显示" }}
+          <button type="button" class="text-button" @click="showToken = !showToken">
+            {{ showToken ? "隐藏" : "显示" }}
           </button>
         </div>
+        <small>访问令牌由管理员在管理端创建，创建后请立即复制保存。</small>
       </label>
 
       <p v-if="isHttp" class="security-note">
-        当前地址使用明文 HTTP。账号密码会保存在本机配置文件中，并直接发送到该地址。
+        当前地址使用明文 HTTP。访问令牌会保存在本机配置文件中，并直接发送到该地址。
       </p>
       <p v-if="error" class="form-error">{{ error }}</p>
 
       <button class="primary-button login-button" type="submit" :disabled="loading || !initialized">
-        {{ loading ? "正在登录…" : "登录并启动监测" }}
+        {{ loading ? "正在验证…" : "保存并启动监测" }}
       </button>
-      <p class="login-hint">登录成功后窗口会收起，可从菜单栏图标随时查看状态。</p>
+      <p class="login-hint">验证通过后窗口会收起，可从菜单栏图标随时查看状态。</p>
     </form>
   </main>
 </template>

@@ -67,18 +67,15 @@ export interface AppSnapshot {
   today: UsageSummary;
   usageDays: UsagePoint[];
   isAdmin: boolean;
-  showKeyUsage: boolean;
   keyUsage: KeyUsageView[];
   error: string | null;
 }
 
 export interface SettingsView {
   baseUrl: string;
-  username: string;
-  password: string;
+  token: string;
   refreshIntervalSec: number;
   lowCreditThreshold: number;
   launchAtLogin: boolean;
-  keyUsageNames: string[];
   configPath: string;
 }

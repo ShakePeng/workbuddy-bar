@@ -186,7 +186,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section v-if="snapshot?.showKeyUsage" class="section-card keys-card">
+    <section v-if="snapshot" class="section-card keys-card">
       <div class="section-title">
         <h2>密钥用量</h2>
         <span>{{ snapshot?.keyUsage.length ?? 0 }} 个</span>
@@ -197,7 +197,7 @@ onUnmounted(() => {
           <span>今日</span>
           <span>累计</span>
         </div>
-        <div class="key-usage-total">
+        <div v-if="(snapshot?.keyUsage.length ?? 0) > 1" class="key-usage-total">
           <span>全部密钥</span>
           <b>{{ formatTokens(keyUsageTotal.todayTokens) }}</b>
           <b>{{ formatTokens(keyUsageTotal.totalTokens) }}</b>
