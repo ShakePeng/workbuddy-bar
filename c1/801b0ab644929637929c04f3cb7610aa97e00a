@@ -1,0 +1,39 @@
+src/components/PopoverView.vue
+  s_b4d96c3feccc2a::t_8fc5abf4c1dccf 189,200
+src-tauri/src/lib.rs
+  s_b4d96c3feccc2a::t_4ce22ff5a6bf72 29-31
+  s_b4d96c3feccc2a::t_13b234d402dbd1 186,737,739,753,755-757,1143,1145-1147,1151-1162,1165,1189,1211,1237,1387
+  s_b4d96c3feccc2a::t_8b464d9b5dff42 21,32,43,160,171,250-252,614,624-625,649-650,693
+  s_b4d96c3feccc2a::t_0b397a46a65d04 1449-1452
+  s_b4d96c3feccc2a::t_3e32a31a9a5c68 1551-1577
+  s_b4d96c3feccc2a::t_ab0fddab6c556e 42,552,678-679,705,1522
+  s_b4d96c3feccc2a::t_952f0c9ec3a1d2 3,1437
+  s_b4d96c3feccc2a::t_01624b37b6d181 573,580
+  s_b4d96c3feccc2a::t_99a67fd242bee6 1550
+src/types.ts
+  s_b4d96c3feccc2a::t_23a40a32156ad5 76
+src/style.css
+  s_b4d96c3feccc2a::t_9ec1f2c9cfb26d 749
+src/components/SettingsView.vue
+  s_b4d96c3feccc2a::t_ecb8c1313bf343 13,18,29,92,95-98,101-102,105,107,132
+  s_b4d96c3feccc2a::t_8fc5abf4c1dccf 12,47
+src/components/LoginView.vue
+  s_b4d96c3feccc2a::t_23a40a32156ad5 7-8,19,33,61,64-67,70-71,74,78,83,85
+  s_b4d96c3feccc2a::t_8fc5abf4c1dccf 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "c1801b0ab644929637929c04f3cb7610aa97e00a",
+  "prompts": {},
+  "sessions": {
+    "s_b4d96c3feccc2a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d216-415c-7833-be97-307bbaec9688",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
