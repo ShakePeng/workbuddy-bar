@@ -6,3 +6,8 @@
 *.exe
 *.msi
 .DS_Store
+
+# GitHub Actions（覆盖全局 .gitignore 对 .github/ 的忽略）
+!.github/
+!.github/workflows/
+!.github/workflows/**

@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-aarch64
+            os: macos-14
+            rust_targets: aarch64-apple-darwin
+            build_args: --target aarch64-apple-darwin --bundles dmg --ci --no-sign
+          - platform: windows-x64
+            os: windows-latest
+            rust_targets: x86_64-pc-windows-msvc
+            build_args: --bundles nsis --ci
+
+    env:
+      YARN_REGISTRY: https://registry.npmmirror.com
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Yarn
+        shell: bash
+        run: npm install --global yarn@1.22.22
+
+      - name: Cache Yarn dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yarn
+            ~/AppData/Local/Yarn/Cache
+          key: ${{ runner.os }}-yarn-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Validate release version
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          expected="${TAG_NAME#v}"
+          if [[ ! "$expected" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag must use v<semver>, got: ${TAG_NAME}" >&2
+            exit 1
+          fi
+
+          package_version="$(node -p "require('./package.json').version")"
+          tauri_version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          cargo_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' src-tauri/Cargo.toml | head -n 1)"
+          cargo_lock_version="$(awk '/^name = "workbuddy-bar"$/{getline; print; exit}' src-tauri/Cargo.lock | sed -E 's/^version = "([^"]+)"$/\1/')"
+
+          if [[ "$package_version" != "$expected" || "$tauri_version" != "$expected" || "$cargo_version" != "$expected" || "$cargo_lock_version" != "$expected" ]]; then
+            echo "Release version mismatch:" >&2
+            echo "  tag:        ${expected}" >&2
+            echo "  package:    ${package_version}" >&2
+            echo "  tauri:      ${tauri_version}" >&2
+            echo "  cargo:      ${cargo_version}" >&2
+            echo "  cargo.lock: ${cargo_lock_version}" >&2
+            exit 1
+          fi
+
+      - name: Run tests
+        run: yarn test
+
+      - name: Build Tauri bundle
+        run: yarn tauri build ${{ matrix.build_args }}
+
+      - name: Collect macOS installer
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          installer="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          if [[ -z "$installer" ]]; then
+            echo 'No macOS DMG was produced' >&2
+            exit 1
+          fi
+          mkdir -p release
+          cp "$installer" "release/WorkBuddyBar-${TAG_NAME}-macos-aarch64.dmg"
+
+      - name: Collect Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'No Windows NSIS installer was produced' }
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item -LiteralPath $installer.FullName -Destination "release/WorkBuddyBar-$env:TAG_NAME-windows-x64-setup.exe"
+
+      - name: Upload platform installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find release-assets -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -type f -name '*.exe' -print -quit)"
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: WorkBuddyBar ${{ github.ref_name }}
+          body: |
+            ## 安装说明
+
+            - macOS Apple Silicon：下载 DMG 后安装。当前版本未签名、未公证；首次打开若被 Gatekeeper 拦截，请右键应用并选择“打开”，或执行：
+              `xattr -dr com.apple.quarantine /Applications/WorkBuddyBar.app`
+            - Windows x64：下载 NSIS 安装包。若出现 SmartScreen 提示，请选择“更多信息”后点击“仍要运行”。
+          files: release-assets/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

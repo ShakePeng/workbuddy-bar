@@ -218,7 +218,7 @@ impl AppState {
     fn new() -> Self {
         let http = Client::builder()
             .timeout(Duration::from_secs(15))
-            .user_agent("WorkBuddyBar/0.1.0")
+            .user_agent(concat!("WorkBuddyBar/", env!("CARGO_PKG_VERSION")))
             .build()
             .expect("failed to build HTTP client");
 
