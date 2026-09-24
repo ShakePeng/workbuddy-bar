@@ -20,10 +20,13 @@ use url::Url;
 const TRAY_ID: &str = "workbuddybar";
 const EVENT_SNAPSHOT: &str = "snapshot-changed";
 const DEFAULT_BASE_URL: &str = "http://47.99.55.3:7864";
+const CONFIG_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AppConfig {
+    #[serde(default)]
+    config_version: u32,
     base_url: String,
     username: String,
     password: String,
@@ -38,6 +41,7 @@ struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            config_version: CONFIG_VERSION,
             base_url: DEFAULT_BASE_URL.to_string(),
             username: String::new(),
             password: String::new(),
@@ -280,6 +284,19 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(data_dir(app)?.join("config.json"))
 }
 
+fn migrate_config(config: &mut AppConfig) -> bool {
+    if config.config_version >= CONFIG_VERSION {
+        return false;
+    }
+
+    // 旧版本默认值为 60 秒；只迁移这一种情况，避免覆盖用户自定义的小间隔。
+    if config.refresh_interval_sec == 60 {
+        config.refresh_interval_sec = 120;
+    }
+    config.config_version = CONFIG_VERSION;
+    true
+}
+
 fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     let path = config_path(app)?;
     if !path.exists() {
@@ -291,14 +308,33 @@ fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     let bytes = std::fs::read(&path).map_err(|error| format!("读取配置失败：{error}"))?;
     let mut config: AppConfig =
         serde_json::from_slice(&bytes).map_err(|error| format!("配置格式错误：{error}"))?;
+    let mut changed = migrate_config(&mut config);
+
     if config.base_url.trim().is_empty() {
         config.base_url = DEFAULT_BASE_URL.to_string();
+        changed = true;
     }
-    config.refresh_interval_sec = config.refresh_interval_sec.clamp(30, 600);
+
+    let refresh_interval_sec = config.refresh_interval_sec.clamp(30, 600);
+    if refresh_interval_sec != config.refresh_interval_sec {
+        config.refresh_interval_sec = refresh_interval_sec;
+        changed = true;
+    }
+
     if !config.low_credit_threshold.is_finite() || config.low_credit_threshold < 0.0 {
         config.low_credit_threshold = 1000.0;
+        changed = true;
     }
-    config.key_usage_names = normalize_key_usage_names(config.key_usage_names);
+
+    let key_usage_names = normalize_key_usage_names(config.key_usage_names.clone());
+    if key_usage_names != config.key_usage_names {
+        config.key_usage_names = key_usage_names;
+        changed = true;
+    }
+
+    if changed {
+        save_config(app, &config)?;
+    }
     Ok(config)
 }
 
@@ -918,6 +954,15 @@ fn add_thousands_separators(digits: &str) -> String {
     output
 }
 
+fn tray_title(snapshot: &AppSnapshot) -> String {
+    let used = compact_number(snapshot.today.today_credit);
+    let remaining = snapshot
+        .total_credits
+        .map(compact_number)
+        .unwrap_or_else(|| "--".into());
+    format!("{used}\n{remaining}")
+}
+
 fn compact_number(value: f64) -> String {
     let rounded = (value * 100.0).round() / 100.0;
     if rounded.abs() >= 100_000.0 {
@@ -952,20 +997,17 @@ fn update_tray(app: &AppHandle, snapshot: &AppSnapshot) {
         return;
     };
 
-    let title = snapshot
-        .total_credits
-        .map(compact_number)
-        .unwrap_or_else(|| "--".into());
+    let title = tray_title(snapshot);
     let _ = tray.set_title(Some(&title));
     set_readable_tray_title(&title);
 
     let tooltip = format!(
-        "WorkBuddyBar · 可用积分 {} · 今日扣费 {} · 账号 {}/{}",
+        "WorkBuddyBar · 今日已用 {} · 剩余总量 {} · 账号 {}/{}",
+        compact_number(snapshot.today.today_credit),
         snapshot
             .total_credits
             .map(compact_number)
             .unwrap_or_else(|| "暂未同步".into()),
-        compact_number(snapshot.today.today_credit),
         snapshot
             .accounts
             .iter()
@@ -1677,6 +1719,39 @@ mod tests {
         assert_eq!(rows[0].name, "beta");
         assert_eq!(rows[0].today_tokens, 7);
         assert_eq!(rows[0].total_tokens, 20);
+    }
+
+    #[test]
+    fn formats_tray_title() {
+        let mut snapshot = AppSnapshot::default();
+        snapshot.today.today_credit = 12.34;
+        snapshot.total_credits = Some(12345.0);
+        assert_eq!(tray_title(&snapshot), "12.34\n12,345");
+
+        snapshot.today.today_credit = 123456.0;
+        snapshot.total_credits = Some(123456.0);
+        assert_eq!(tray_title(&snapshot), "123.5k\n123.5k");
+
+        snapshot.today.today_credit = 0.0;
+        snapshot.total_credits = None;
+        assert_eq!(tray_title(&snapshot), "0\n--");
+    }
+
+    #[test]
+    fn migrates_old_default_refresh_interval_once() {
+        let mut config = AppConfig {
+            config_version: 0,
+            refresh_interval_sec: 60,
+            ..AppConfig::default()
+        };
+
+        assert!(migrate_config(&mut config));
+        assert_eq!(config.config_version, CONFIG_VERSION);
+        assert_eq!(config.refresh_interval_sec, 120);
+
+        config.refresh_interval_sec = 60;
+        assert!(!migrate_config(&mut config));
+        assert_eq!(config.refresh_interval_sec, 60);
     }
 
     #[test]
