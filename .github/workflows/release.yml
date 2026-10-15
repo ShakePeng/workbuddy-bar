@@ -1,5 +1,9 @@
 name: Release
 
+# 同一个提交会同时产生 main 的预热 run 与 tag 的发布 run，用 run-name 区分，
+# 避免在 Actions 列表里出现两个同名的 "Release #N"。
+run-name: "${{ startsWith(github.ref, 'refs/tags/') && format('Release {0}', github.ref_name) || 'Cache warm-up (main)' }}"
+
 on:
   push:
     tags:
@@ -17,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.platform }}
+    name: "${{ startsWith(github.ref, 'refs/tags/') && 'Build' || 'Warm cache' }} ${{ matrix.platform }}"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
