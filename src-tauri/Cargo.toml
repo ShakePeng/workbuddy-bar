@@ -7,7 +7,10 @@ edition = "2021"
 
 [lib]
 name = "workbuddy_bar_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# 只发布桌面端：桌面构建只需要 rlib。原先的 staticlib/cdylib 会让同一份代码
+# 多跑两遍 LTO（Windows 上还会多产出 131MB 的 .lib），大幅拖慢 CI 与缓存。
+# 将来要做 iOS/Android 时再改回 ["staticlib", "cdylib", "rlib"]。
+crate-type = ["lib"]
 
 [build-dependencies]
 cc = "1"

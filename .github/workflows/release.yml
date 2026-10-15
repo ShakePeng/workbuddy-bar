@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+    # main 上的推送只用于预热编译缓存（见下方 Build 步骤），不打标签、不发布。
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -24,10 +27,12 @@ jobs:
             os: macos-14
             rust_targets: aarch64-apple-darwin
             build_args: --target aarch64-apple-darwin --bundles dmg --ci --no-sign
+            warm_args: --target aarch64-apple-darwin --ci --no-sign --no-bundle
           - platform: windows-x64
             os: windows-latest
             rust_targets: x86_64-pc-windows-msvc
             build_args: --bundles nsis --ci
+            warm_args: --ci --no-bundle
 
     env:
       YARN_REGISTRY: https://registry.npmmirror.com
@@ -35,6 +40,15 @@ jobs:
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v4
+
+      # Windows Defender 会实时扫描 cargo 生成的成千上万个小文件，是纯粹额外开销。
+      # 托管 runner 是一次性的，排除路径只影响本次构建；失败也不影响流程。
+      - name: Exclude build paths from Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}\src-tauri\target", "$env:RUNNER_TEMP", "$env:LOCALAPPDATA\Yarn"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -45,30 +59,36 @@ jobs:
         shell: bash
         run: npm install --global yarn@1.22.22
 
-      - name: Cache Yarn dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/yarn
-            ~/AppData/Local/Yarn/Cache
-          key: ${{ runner.os }}-yarn-${{ hashFiles('yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-yarn-
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_targets }}
 
+      # 前端依赖只有 80 多个包（冷装约 20s），缓存保存却要 1 分多钟，
+      # 还会挤占仓库 10GB 的缓存配额，因此不再缓存 Yarn。
+      # prefix-key 在发布 profile 改动后主动让旧缓存失效一次。
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          shared-key: ${{ matrix.platform }}
+          prefix-key: v1-thin
+          cache-on-failure: true
+
+      - name: Cache Tauri bundler tools
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/tauri
+            ~/AppData/Local/tauri
+          key: tauri-bundler-${{ runner.os }}-${{ hashFiles('src-tauri/tauri.conf.json') }}
 
       - name: Install frontend dependencies
         run: yarn install --frozen-lockfile
 
       - name: Validate release version
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           TAG_NAME: ${{ github.ref_name }}
@@ -96,14 +116,32 @@ jobs:
             exit 1
           fi
 
+      # Windows 上再跑一遍 cargo test，等于用 dev profile 把 500+ crate 重编一次
+      # （实测 7 分 18 秒），所以测试只在 macOS 跑一遍；Windows 专属的编译问题
+      # 仍会由下面的 release 构建暴露。
       - name: Run tests
+        if: matrix.platform == 'macos-aarch64'
         run: yarn test
 
+      # 发布构建改用 thin LTO + 16 个 codegen unit，避免 full LTO 在 MSVC 上
+      # 把代码生成与链接串行化；本地 `yarn tauri:build` 仍是 Cargo.toml 里的 full LTO。
+      # main 上只预热编译缓存：不打包、不产出安装包。
+      - name: Build Tauri bundle (warm cache)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        env:
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: yarn tauri build ${{ matrix.warm_args }}
+
       - name: Build Tauri bundle
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
         run: yarn tauri build ${{ matrix.build_args }}
 
       - name: Collect macOS installer
-        if: runner.os == 'macOS'
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
         shell: bash
         env:
           TAG_NAME: ${{ github.ref_name }}
@@ -118,7 +156,7 @@ jobs:
           cp "$installer" "release/WorkBuddyBar-${TAG_NAME}-macos-aarch64.dmg"
 
       - name: Collect Windows installer
-        if: runner.os == 'Windows'
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Windows'
         shell: pwsh
         env:
           TAG_NAME: ${{ github.ref_name }}
@@ -129,6 +167,7 @@ jobs:
           Copy-Item -LiteralPath $installer.FullName -Destination "release/WorkBuddyBar-$env:TAG_NAME-windows-x64-setup.exe"
 
       - name: Upload platform installer
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}
@@ -139,6 +178,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
     steps:
