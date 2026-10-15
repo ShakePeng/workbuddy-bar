@@ -1,3 +1,4 @@
+use reqwest::header::{HeaderMap, COOKIE, SET_COOKIE};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,7 +19,15 @@ use url::Url;
 
 const TRAY_ID: &str = "workbuddybar";
 const EVENT_SNAPSHOT: &str = "snapshot-changed";
-const CONFIG_VERSION: u32 = 3;
+const CONFIG_VERSION: u32 = 4;
+const AUTH_MODE_TOKEN: &str = "token";
+const AUTH_MODE_PASSWORD: &str = "password";
+// 管理端会话 Cookie 名称，登录后按原值回传，续期时以响应里的新值为准。
+const SESSION_COOKIE_NAME: &str = "wb_session";
+
+fn default_auth_mode() -> String {
+    AUTH_MODE_TOKEN.to_string()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,10 +35,21 @@ struct AppConfig {
     #[serde(default)]
     config_version: u32,
     base_url: String,
+    // 登录方式：token（访问令牌）或 password（账户密码 + 会话 Cookie）。
+    #[serde(default = "default_auth_mode")]
+    auth_mode: String,
     // 管理端访问令牌（wbt_ 前缀），以 Authorization: Bearer 透传。
     // 老版本配置里没有这个字段，必须给默认值，否则升级时整份配置解析失败、地址被丢。
     #[serde(default)]
     token: String,
+    // 账户密码方式的凭据：会话过期时用它们自动重新登录，因此需要落盘（0600）。
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    password: String,
+    // 账户密码方式拿到的管理端会话 Cookie，服务端续期后会更新。
+    #[serde(default)]
+    session_cookie: String,
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
@@ -40,11 +60,42 @@ impl Default for AppConfig {
         Self {
             config_version: CONFIG_VERSION,
             base_url: String::new(),
+            auth_mode: default_auth_mode(),
             token: String::new(),
+            username: String::new(),
+            password: String::new(),
+            session_cookie: String::new(),
             refresh_interval_sec: 120,
             low_credit_threshold: 1000.0,
             launch_at_login: false,
         }
+    }
+}
+
+impl AppConfig {
+    fn is_password_mode(&self) -> bool {
+        self.auth_mode == AUTH_MODE_PASSWORD
+    }
+
+    // 凭据足够发起管理端请求即可轮询：账户密码方式即使没存密码，
+    // 只要还有上一次的会话 Cookie 就继续用，避免每次启动都强制重登。
+    fn can_refresh(&self) -> bool {
+        if self.base_url.trim().is_empty() {
+            return false;
+        }
+        if self.is_password_mode() {
+            return !self.session_cookie.is_empty()
+                || (!self.username.trim().is_empty() && !self.password.is_empty());
+        }
+        !self.token.trim().is_empty()
+    }
+}
+
+fn normalize_auth_mode(raw: &str) -> String {
+    if raw.trim() == AUTH_MODE_PASSWORD {
+        AUTH_MODE_PASSWORD.to_string()
+    } else {
+        AUTH_MODE_TOKEN.to_string()
     }
 }
 
@@ -157,7 +208,10 @@ impl Default for AppSnapshot {
 #[serde(rename_all = "camelCase")]
 struct SettingsView {
     base_url: String,
+    auth_mode: String,
     token: String,
+    username: String,
+    password: String,
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
@@ -169,6 +223,8 @@ struct SettingsView {
 struct SettingsInput {
     base_url: String,
     token: String,
+    username: String,
+    password: String,
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
@@ -177,13 +233,16 @@ struct SettingsInput {
 #[derive(Debug)]
 enum ApiError {
     AuthExpired,
+    // 登录被明确拒绝（401/429）：文案来自管理端，直接展示，不再追加「访问令牌」前缀。
+    Rejected(String),
     Message(String),
 }
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::AuthExpired => write!(f, "访问令牌已失效，请重新填写"),
+            Self::AuthExpired => write!(f, "登录已失效，请重新登录"),
+            Self::Rejected(message) => write!(f, "{message}"),
             Self::Message(message) => write!(f, "{message}"),
         }
     }
@@ -267,6 +326,18 @@ fn migrate_config(config: &mut AppConfig) -> bool {
         return false;
     }
 
+    // v3 及更早的配置没有 authMode：有访问令牌就沿用令牌方式，
+    // 否则回落到账户密码（1.0.1 之前的配置本来就存着用户名/密码/会话）。
+    if config.config_version < 4 {
+        config.auth_mode = if !config.token.trim().is_empty() {
+            AUTH_MODE_TOKEN.to_string()
+        } else if !config.username.trim().is_empty() || !config.password.is_empty() {
+            AUTH_MODE_PASSWORD.to_string()
+        } else {
+            AUTH_MODE_TOKEN.to_string()
+        };
+    }
+
     // 旧版本默认值为 60 秒；只迁移这一种情况，避免覆盖用户自定义的小间隔。
     if config.refresh_interval_sec == 60 {
         config.refresh_interval_sec = 120;
@@ -287,6 +358,12 @@ fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     let mut config: AppConfig =
         serde_json::from_slice(&bytes).map_err(|error| format!("配置格式错误：{error}"))?;
     let mut changed = migrate_config(&mut config);
+
+    let auth_mode = normalize_auth_mode(&config.auth_mode);
+    if auth_mode != config.auth_mode {
+        config.auth_mode = auth_mode;
+        changed = true;
+    }
 
     let refresh_interval_sec = config.refresh_interval_sec.clamp(30, 600);
     if refresh_interval_sec != config.refresh_interval_sec {
@@ -321,6 +398,17 @@ fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
             .map_err(|error| format!("设置配置权限失败：{error}"))?;
     }
     Ok(())
+}
+
+// 会话 Cookie 变化时同步内存与磁盘：即使落盘失败，本次运行仍然使用新会话，
+// 因此只提示错误、不让刷新流程失败。
+fn store_session_cookie(app: &AppHandle, config: &mut AppConfig, cookie: String) {
+    config.session_cookie = cookie;
+    let state = app.state::<AppState>();
+    state.set_config(config.clone());
+    if let Err(error) = save_config(app, config) {
+        eprintln!("保存管理端会话失败：{error}");
+    }
 }
 
 fn normalize_base_url(raw: &str) -> Result<String, String> {
@@ -592,8 +680,8 @@ fn parse_key_usage(keys: &Value, today: &Value) -> Vec<KeyUsageView> {
     key_usage
 }
 
-fn api_message(status: StatusCode, raw: &str) -> String {
-    let detail = serde_json::from_str::<Value>(raw)
+fn api_detail(status: StatusCode, raw: &str) -> String {
+    serde_json::from_str::<Value>(raw)
         .ok()
         .and_then(|value| {
             value
@@ -609,7 +697,11 @@ fn api_message(status: StatusCode, raw: &str) -> String {
             } else {
                 raw.trim().chars().take(200).collect()
             }
-        });
+        })
+}
+
+fn api_message(status: StatusCode, raw: &str) -> String {
+    let detail = api_detail(status, raw);
     if status == StatusCode::UNAUTHORIZED {
         return format!("访问令牌无效：{detail}");
     }
@@ -619,16 +711,71 @@ fn api_message(status: StatusCode, raw: &str) -> String {
     format!("管理端返回 {status}：{detail}")
 }
 
-async fn get_json(client: &Client, config: &AppConfig, path: &str) -> Result<Value, ApiError> {
-    let mut request = client.get(format!("{}{}", config.base_url, path));
-    if !config.token.is_empty() {
-        request = request.bearer_auth(&config.token);
+// 账户密码登录走 /api/login，失败文案（用户名或密码错误 / 失败次数过多）
+// 由管理端给出，直接展示，不套用令牌专用前缀。
+fn login_message(status: StatusCode, raw: &str) -> String {
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::TOO_MANY_REQUESTS {
+        return api_detail(status, raw);
     }
+    api_message(status, raw)
+}
+
+fn auth_expired_message(config: &AppConfig) -> String {
+    if config.is_password_mode() {
+        "登录状态已失效，请重新输入账号密码".into()
+    } else {
+        "访问令牌已失效，请重新填写".into()
+    }
+}
+
+struct ApiReply {
+    value: Value,
+    // 管理端续期会话会在响应里重新下发 wb_session，必须回写配置，
+    // 否则持有的 Cookie 一直停在旧 iat，闲置 12 小时后会被判失效。
+    renewed_cookie: Option<String>,
+}
+
+fn apply_auth(request: reqwest::RequestBuilder, config: &AppConfig) -> reqwest::RequestBuilder {
+    if config.is_password_mode() {
+        if config.session_cookie.is_empty() {
+            return request;
+        }
+        return request.header(
+            COOKIE,
+            format!("{}={}", SESSION_COOKIE_NAME, config.session_cookie),
+        );
+    }
+    if config.token.is_empty() {
+        return request;
+    }
+    request.bearer_auth(&config.token)
+}
+
+fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
+    let prefix = format!("{SESSION_COOKIE_NAME}=");
+    for value in headers.get_all(SET_COOKIE) {
+        let Ok(raw) = value.to_str() else {
+            continue;
+        };
+        for part in raw.split(';') {
+            let Some(cookie) = part.trim().strip_prefix(prefix.as_str()) else {
+                continue;
+            };
+            if !cookie.is_empty() {
+                return Some(cookie.to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn send_json(request: reqwest::RequestBuilder) -> Result<ApiReply, ApiError> {
     let response = request
         .send()
         .await
         .map_err(|error| ApiError::Message(format!("无法连接管理端：{error}")))?;
     let status = response.status();
+    let headers = response.headers().clone();
     let body = response
         .text()
         .await
@@ -640,71 +787,104 @@ async fn get_json(client: &Client, config: &AppConfig, path: &str) -> Result<Val
     if !status.is_success() {
         return Err(ApiError::Message(api_message(status, &body)));
     }
-    serde_json::from_str(&body)
-        .map_err(|error| ApiError::Message(format!("管理端响应格式错误：{error}")))
+    let value = serde_json::from_str(&body)
+        .map_err(|error| ApiError::Message(format!("管理端响应格式错误：{error}")))?;
+    Ok(ApiReply {
+        value,
+        renewed_cookie: extract_session_cookie(&headers),
+    })
 }
 
-async fn post_json(client: &Client, config: &AppConfig, path: &str) -> Result<Value, ApiError> {
-    let mut request = client.post(format!("{}{}", config.base_url, path));
-    if !config.token.is_empty() {
-        request = request.bearer_auth(&config.token);
-    }
-    let response = request
+async fn get_json(client: &Client, config: &AppConfig, path: &str) -> Result<ApiReply, ApiError> {
+    let request = apply_auth(client.get(format!("{}{}", config.base_url, path)), config);
+    send_json(request).await
+}
+
+async fn post_json(client: &Client, config: &AppConfig, path: &str) -> Result<ApiReply, ApiError> {
+    let request = apply_auth(client.post(format!("{}{}", config.base_url, path)), config);
+    send_json(request).await
+}
+
+async fn api_login(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> Result<String, ApiError> {
+    let response = client
+        .post(format!("{base_url}/api/login"))
+        .json(&serde_json::json!({ "username": username, "password": password }))
         .send()
         .await
         .map_err(|error| ApiError::Message(format!("无法连接管理端：{error}")))?;
+
     let status = response.status();
+    let headers = response.headers().clone();
     let body = response
         .text()
         .await
-        .map_err(|error| ApiError::Message(format!("读取管理端响应失败：{error}")))?;
+        .map_err(|error| ApiError::Message(format!("读取登录响应失败：{error}")))?;
 
-    if status == StatusCode::UNAUTHORIZED {
-        return Err(ApiError::AuthExpired);
-    }
     if !status.is_success() {
-        return Err(ApiError::Message(api_message(status, &body)));
+        return Err(ApiError::Rejected(login_message(status, &body)));
     }
-    serde_json::from_str(&body)
-        .map_err(|error| ApiError::Message(format!("管理端响应格式错误：{error}")))
+    extract_session_cookie(&headers)
+        .ok_or_else(|| ApiError::Message("管理端未返回 wb_session 会话".into()))
 }
 
-async fn fetch_snapshot(client: &Client, config: &AppConfig) -> Result<AppSnapshot, ApiError> {
+async fn fetch_snapshot(
+    client: &Client,
+    config: &AppConfig,
+) -> Result<(AppSnapshot, Option<String>), ApiError> {
     let me = get_json(client, config, "/api/me").await?;
     let accounts = get_json(client, config, "/api/accounts").await?;
     let summary = get_json(client, config, "/api/stats/summary").await?;
     let daily = get_json(client, config, "/api/stats/daily?days=30").await?;
-    let is_admin = me.get("role").and_then(Value::as_str) == Some("admin");
+    let is_admin = me.value.get("role").and_then(Value::as_str) == Some("admin");
     let keys = get_json(client, config, "/api/keys").await?;
     let key_today = get_json(client, config, "/api/stats/by-key?days=1").await?;
 
-    let (mut parsed_accounts, enabled_accounts, _, _, _) = parse_accounts(&accounts);
+    let (mut parsed_accounts, enabled_accounts, _, _, _) = parse_accounts(&accounts.value);
     let realtime_credits =
         post_json(client, config, "/api/accounts/refresh-credits?force=false").await?;
     let (credit_synced_accounts, credit_partial, total_credits) =
-        apply_realtime_credits(&mut parsed_accounts, &realtime_credits);
+        apply_realtime_credits(&mut parsed_accounts, &realtime_credits.value);
     let now = now_secs();
 
-    Ok(AppSnapshot {
+    let renewed_cookie = [
+        &me,
+        &accounts,
+        &summary,
+        &daily,
+        &keys,
+        &key_today,
+        &realtime_credits,
+    ]
+    .into_iter()
+    .filter_map(|reply| reply.renewed_cookie.clone())
+    .last();
+
+    let snapshot = AppSnapshot {
         updated_at: now,
         last_success_at: now,
         stale: false,
         auth_state: "ok".into(),
-        username: display_username(&value_string(me.get("username"))),
-        pool_available: value_bool(accounts.get("pool_available")).unwrap_or(false),
-        pool_synced: value_u64(accounts.get("pool_synced")),
-        account_total: value_u64(accounts.get("total")).max(parsed_accounts.len() as u64),
+        username: display_username(&value_string(me.value.get("username"))),
+        pool_available: value_bool(accounts.value.get("pool_available")).unwrap_or(false),
+        pool_synced: value_u64(accounts.value.get("pool_synced")),
+        account_total: value_u64(accounts.value.get("total")).max(parsed_accounts.len() as u64),
         enabled_accounts,
         credit_synced_accounts,
         credit_partial,
         total_credits,
         accounts: parsed_accounts,
-        today: parse_usage_summary(&summary),
-        usage_days: parse_usage_days(&daily),
+        today: parse_usage_summary(&summary.value),
+        usage_days: parse_usage_days(&daily.value),
         is_admin,
-        key_usage: parse_key_usage(&keys, &key_today),
+        key_usage: parse_key_usage(&keys.value, &key_today.value),
         error: None,
-    })
+    };
+    Ok((snapshot, renewed_cookie))
 }
 
 fn publish(app: &AppHandle, snapshot: AppSnapshot) {
@@ -734,9 +914,9 @@ fn publish_error(app: &AppHandle, error: impl Into<String>) {
 
 async fn refresh_state(app: &AppHandle) -> AppSnapshot {
     let state = app.state::<AppState>();
-    let config = state.config();
+    let mut config = state.config();
 
-    if config.token.trim().is_empty() {
+    if !config.can_refresh() {
         let mut snapshot = AppSnapshot::default();
         snapshot.updated_at = now_secs();
         state.set_snapshot(snapshot.clone());
@@ -745,14 +925,46 @@ async fn refresh_state(app: &AppHandle) -> AppSnapshot {
         return snapshot;
     }
 
-    match fetch_snapshot(&state.http, &config).await {
-        Ok(snapshot) => {
+    let mut outcome = fetch_snapshot(&state.http, &config).await;
+
+    // 账户密码方式的会话有总时长与闲置限制：先凭保存的账号密码自动重新登录一次，
+    // 让托盘应用可以长期无人值守；重登失败才把登录窗口叫回来。
+    if matches!(outcome, Err(ApiError::AuthExpired))
+        && config.is_password_mode()
+        && !config.username.trim().is_empty()
+        && !config.password.is_empty()
+    {
+        match api_login(
+            &state.http,
+            &config.base_url,
+            &config.username,
+            &config.password,
+        )
+        .await
+        {
+            Ok(cookie) => {
+                store_session_cookie(app, &mut config, cookie);
+                outcome = fetch_snapshot(&state.http, &config).await;
+            }
+            Err(error) => {
+                publish_error(app, error.to_string());
+                present_login(app);
+                return state.snapshot();
+            }
+        }
+    }
+
+    match outcome {
+        Ok((snapshot, cookie)) => {
+            if let Some(cookie) = cookie {
+                store_session_cookie(app, &mut config, cookie);
+            }
             publish(app, snapshot);
             state.snapshot()
         }
-        // 令牌被删除、过期或管理端重置了密钥：直接把登录窗口叫回来让用户重填。
+        // 凭据被删除、过期或管理端重置了密钥：直接把登录窗口叫回来让用户重填。
         Err(ApiError::AuthExpired) => {
-            publish_error(app, "访问令牌已失效，请重新填写");
+            publish_error(app, auth_expired_message(&config));
             present_login(app);
             state.snapshot()
         }
@@ -1140,34 +1352,68 @@ fn load_state(state: State<'_, AppState>) -> AppSnapshot {
 }
 
 #[tauri::command]
-async fn login(app: AppHandle, base_url: String, token: String) -> Result<AppSnapshot, String> {
+async fn login(
+    app: AppHandle,
+    base_url: String,
+    auth_mode: String,
+    token: String,
+    username: String,
+    password: String,
+) -> Result<AppSnapshot, String> {
     let base_url = normalize_base_url(&base_url)?;
-    let token = token.trim().to_string();
-    if token.is_empty() {
-        return Err("请输入访问令牌".into());
+    let state = app.state::<AppState>();
+
+    let mut config = state.config();
+    config.base_url = base_url.clone();
+    config.auth_mode = normalize_auth_mode(&auth_mode);
+
+    if config.is_password_mode() {
+        let username = username.trim().to_string();
+        if username.is_empty() {
+            return Err("请输入用户名".into());
+        }
+        if password.is_empty() {
+            return Err("请输入密码".into());
+        }
+        // 两种方式的凭据不并存：切换方式时清掉另一种。
+        config.token.clear();
+        config.username = username;
+        config.password = password;
+        let cookie = api_login(&state.http, &base_url, &config.username, &config.password).await?;
+        config.session_cookie = cookie;
+    } else {
+        let token = token.trim().to_string();
+        if token.is_empty() {
+            return Err("请输入访问令牌".into());
+        }
+        config.token = token;
+        config.username.clear();
+        config.password.clear();
+        config.session_cookie.clear();
     }
 
-    let state = app.state::<AppState>();
-    // 先拿 /api/me 验活：令牌错了就当场报错，不把无效令牌写进配置。
-    let mut probe = state.config();
-    probe.base_url = base_url.clone();
-    probe.token = token.clone();
-    match get_json(&state.http, &probe, "/api/me").await {
-        Ok(_) => {}
-        Err(ApiError::AuthExpired) => {
-            return Err("访问令牌无效或已过期，请在管理端重新创建".into())
+    // 先拿 /api/me 验活：凭据错了就当场报错，不把无效凭据写进配置。
+    match get_json(&state.http, &config, "/api/me").await {
+        Ok(reply) => {
+            if let Some(cookie) = reply.renewed_cookie {
+                config.session_cookie = cookie;
+            }
         }
+        Err(ApiError::AuthExpired) if config.is_password_mode() => {
+            return Err("管理端未接受本次登录会话，请稍后重试".into())
+        }
+        Err(ApiError::AuthExpired) => return Err("访问令牌无效或已过期，请在管理端重新创建".into()),
         Err(error) => return Err(error.to_string()),
     }
 
-    let mut config = state.config();
-    config.base_url = base_url;
-    config.token = token;
     save_config(&app, &config)?;
-    state.set_config(config);
+    state.set_config(config.clone());
 
-    let snapshot = match fetch_snapshot(&state.http, &state.config()).await {
-        Ok(snapshot) => {
+    let snapshot = match fetch_snapshot(&state.http, &config).await {
+        Ok((snapshot, cookie)) => {
+            if let Some(cookie) = cookie {
+                store_session_cookie(&app, &mut config, cookie);
+            }
             publish(&app, snapshot);
             state.snapshot()
         }
@@ -1186,7 +1432,11 @@ async fn login(app: AppHandle, base_url: String, token: String) -> Result<AppSna
 #[tauri::command]
 fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let mut config = state.config();
+    // 退出登录清空全部凭据与会话，但保留地址、监测设置和上次选择的登录方式。
     config.token.clear();
+    config.username.clear();
+    config.password.clear();
+    config.session_cookie.clear();
     save_config(&app, &config)?;
     state.set_config(config);
     let mut snapshot = AppSnapshot::default();
@@ -1208,7 +1458,10 @@ fn get_settings(app: AppHandle, state: State<'_, AppState>) -> Result<SettingsVi
     let config = state.config();
     Ok(SettingsView {
         base_url: config.base_url,
+        auth_mode: config.auth_mode,
         token: config.token,
+        username: config.username,
+        password: config.password,
         refresh_interval_sec: config.refresh_interval_sec,
         low_credit_threshold: config.low_credit_threshold,
         launch_at_login: config.launch_at_login,
@@ -1232,9 +1485,23 @@ async fn save_settings(
         1000.0
     };
 
+    let token = settings.token.trim().to_string();
+    let username = settings.username.trim().to_string();
+    let password = settings.password;
+
     let mut config = state.config();
     config.base_url = base_url;
-    config.token = settings.token.trim().to_string();
+    // 登录方式由登录页决定，设置页只维护当前方式对应的凭据。
+    if config.is_password_mode() {
+        // 换账号或改密码会让旧会话立即作废，交给 refresh_state 重新登录验证。
+        if username != config.username || password != config.password {
+            config.session_cookie.clear();
+        }
+        config.username = username;
+        config.password = password;
+    } else {
+        config.token = token;
+    }
     config.refresh_interval_sec = interval;
     config.low_credit_threshold = threshold;
     config.launch_at_login = settings.launch_at_login;
@@ -1384,7 +1651,7 @@ pub fn run() {
                 );
             }
 
-            if config.token.trim().is_empty() {
+            if !config.can_refresh() {
                 present_login(app.handle());
             } else {
                 let handle = app.handle().clone();
@@ -1548,9 +1815,28 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_config_and_drops_credentials() {
-        // 旧版配置里的账号/密码/会话 Cookie/密钥名单必须能被读进来（不报错），
-        // 并在迁移后不再写回磁盘——密码不能继续留在配置文件里。
+    fn migrates_v3_config_keeping_token_mode() {
+        // 1.0.1 的配置只有访问令牌：升级后仍是令牌方式，地址与其它设置不丢。
+        let legacy = r#"{
+            "configVersion": 3,
+            "baseUrl": "http://47.99.55.3:7864",
+            "token": "wbt_abc",
+            "refreshIntervalSec": 120,
+            "lowCreditThreshold": 1000.0,
+            "launchAtLogin": false
+        }"#;
+        let mut config: AppConfig = serde_json::from_str(legacy).unwrap();
+        assert!(migrate_config(&mut config));
+        assert_eq!(config.config_version, CONFIG_VERSION);
+        assert_eq!(config.auth_mode, AUTH_MODE_TOKEN);
+        assert_eq!(config.token, "wbt_abc");
+        assert_eq!(config.base_url, "http://47.99.55.3:7864");
+    }
+
+    #[test]
+    fn migrates_legacy_password_config_back_to_password_mode() {
+        // 1.0.0 及更早的配置存着账号/密码/会话：升级后回到账户密码方式，
+        // 这样会话过期时还能自动重新登录。已删除的旧字段（密钥名单）不再写回。
         let legacy = r#"{
             "configVersion": 2,
             "baseUrl": "http://47.99.55.3:7864",
@@ -1563,16 +1849,106 @@ mod tests {
             "keyUsageNames": ["公司Mac"]
         }"#;
         let mut config: AppConfig = serde_json::from_str(legacy).unwrap();
-        assert_eq!(config.base_url, "http://47.99.55.3:7864");
         assert!(migrate_config(&mut config));
         assert_eq!(config.config_version, CONFIG_VERSION);
+        assert_eq!(config.auth_mode, AUTH_MODE_PASSWORD);
+        assert_eq!(config.username, "stats");
+        assert_eq!(config.password, "secret");
+        assert_eq!(config.session_cookie, "abc");
+        assert!(config.can_refresh());
 
         let written = serde_json::to_string(&config).unwrap();
-        assert!(!written.contains("password"));
-        assert!(!written.contains("sessionCookie"));
-        assert!(!written.contains("username"));
         assert!(!written.contains("keyUsageNames"));
-        assert!(written.contains(r#""token":"""#));
+    }
+
+    #[test]
+    fn requires_credentials_matching_auth_mode() {
+        let mut config = AppConfig::default();
+        assert!(!config.can_refresh());
+
+        config.base_url = "http://host:1".into();
+        assert!(!config.can_refresh());
+        config.token = "wbt_x".into();
+        assert!(config.can_refresh());
+
+        config.auth_mode = AUTH_MODE_PASSWORD.into();
+        config.token.clear();
+        assert!(!config.can_refresh());
+        config.username = "stats".into();
+        config.password = "secret".into();
+        assert!(config.can_refresh());
+
+        // 只剩会话 Cookie 也继续轮询，避免每次启动都强制重新登录。
+        config.username.clear();
+        config.password.clear();
+        assert!(!config.can_refresh());
+        config.session_cookie = "sess".into();
+        assert!(config.can_refresh());
+    }
+
+    #[test]
+    fn extracts_renewed_session_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            SET_COOKIE,
+            "wb_session=abc123; HttpOnly; Path=/; SameSite=lax"
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(extract_session_cookie(&headers).as_deref(), Some("abc123"));
+
+        // 退出登录时管理端会下发空值删 Cookie，不能当成新会话。
+        let mut cleared = HeaderMap::new();
+        cleared.append(SET_COOKIE, "wb_session=; Path=/".parse().unwrap());
+        assert_eq!(extract_session_cookie(&cleared), None);
+    }
+
+    #[test]
+    fn applies_auth_header_by_mode() {
+        let client = Client::new();
+        let mut config = AppConfig {
+            base_url: "http://host:1".into(),
+            token: "wbt_abc".into(),
+            ..AppConfig::default()
+        };
+
+        let request = apply_auth(client.get("http://host:1/api/me"), &config)
+            .build()
+            .unwrap();
+        assert_eq!(
+            request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "Bearer wbt_abc"
+        );
+        assert!(request.headers().get(COOKIE).is_none());
+
+        config.auth_mode = AUTH_MODE_PASSWORD.into();
+        config.session_cookie = "sess123".into();
+        let request = apply_auth(client.get("http://host:1/api/me"), &config)
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.headers().get(COOKIE).unwrap().to_str().unwrap(),
+            "wb_session=sess123"
+        );
+        assert!(request.headers().get("authorization").is_none());
+    }
+
+    #[test]
+    fn keeps_manager_wording_for_password_login_failures() {
+        let rejected = login_message(StatusCode::UNAUTHORIZED, r#"{"detail":"用户名或密码错误"}"#);
+        assert_eq!(rejected, "用户名或密码错误");
+        assert!(!rejected.contains("访问令牌"));
+
+        let locked = login_message(
+            StatusCode::TOO_MANY_REQUESTS,
+            r#"{"detail":"失败次数过多，请 10 分钟后再试"}"#,
+        );
+        assert_eq!(locked, "失败次数过多，请 10 分钟后再试");
     }
 
     #[test]

@@ -1,4 +1,5 @@
 export type AuthState = "ok" | "login_required" | "error";
+export type AuthMode = "token" | "password";
 export type AccountStatus = "healthy" | "cooling" | "disabled" | "expired" | "unavailable" | "unknown";
 
 export interface AccountView {
@@ -73,9 +74,15 @@ export interface AppSnapshot {
 
 export interface SettingsView {
   baseUrl: string;
+  authMode: AuthMode;
   token: string;
+  username: string;
+  password: string;
   refreshIntervalSec: number;
   lowCreditThreshold: number;
   launchAtLogin: boolean;
   configPath: string;
 }
+
+// 保存设置时登录方式由登录页决定，这里只提交当前方式对应的凭据与监测项。
+export type SettingsInput = Omit<SettingsView, "configPath" | "authMode">;

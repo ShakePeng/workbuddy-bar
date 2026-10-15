@@ -1,32 +1,40 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppSnapshot, SettingsView } from "../types";
+import type { AppSnapshot, AuthMode, SettingsInput, SettingsView } from "../types";
 
 const loading = ref(true);
 const saving = ref(false);
 const saved = ref(false);
 const error = ref("");
 const settings = ref<SettingsView | null>(null);
-const form = ref({
+const authMode = ref<AuthMode>("token");
+const form = ref<SettingsInput>({
   baseUrl: "",
   token: "",
+  username: "",
+  password: "",
   refreshIntervalSec: 120,
   lowCreditThreshold: 1000,
   launchAtLogin: false,
 });
 const showToken = ref(false);
+const showPassword = ref(false);
 
 const isHttp = computed(() => form.value.baseUrl.trim().toLowerCase().startsWith("http://"));
+const isPasswordMode = computed(() => authMode.value === "password");
 
 async function load() {
   loading.value = true;
   try {
     const value = await invoke<SettingsView>("get_settings");
     settings.value = value;
+    authMode.value = value.authMode;
     form.value = {
       baseUrl: value.baseUrl,
       token: value.token,
+      username: value.username,
+      password: value.password,
       refreshIntervalSec: value.refreshIntervalSec,
       lowCreditThreshold: value.lowCreditThreshold,
       launchAtLogin: value.launchAtLogin,
@@ -84,11 +92,18 @@ onMounted(load);
     <form v-if="!loading" class="settings-form" @submit.prevent="save">
       <section class="settings-section">
         <h2>连接</h2>
+        <div class="mode-row">
+          <span>
+            登录方式
+            <small>更换方式请先退出登录</small>
+          </span>
+          <b class="mode-badge">{{ isPasswordMode ? "账户密码" : "访问令牌" }}</b>
+        </div>
         <label>
           <span>管理端地址</span>
           <input v-model="form.baseUrl" type="url" required />
         </label>
-        <label>
+        <label v-if="!isPasswordMode">
           <span>访问令牌</span>
           <div class="password-field">
             <input
@@ -104,7 +119,34 @@ onMounted(load);
           </div>
           <small>访问令牌由管理员在管理端创建。</small>
         </label>
-        <p v-if="isHttp" class="security-note">该地址使用明文 HTTP，访问令牌会写入本机配置文件并在网络上明文传输。</p>
+        <template v-else>
+          <label>
+            <span>用户名</span>
+            <input v-model="form.username" type="text" autocomplete="username" required />
+          </label>
+          <label>
+            <span>密码</span>
+            <div class="password-field">
+              <input
+                v-model="form.password"
+                :type="showPassword ? 'text' : 'password'"
+                autocomplete="current-password"
+                required
+              />
+              <button type="button" class="text-button" @click="showPassword = !showPassword">
+                {{ showPassword ? "隐藏" : "显示" }}
+              </button>
+            </div>
+            <small>会话过期时会用保存的账号密码自动重新登录。</small>
+          </label>
+        </template>
+        <p v-if="isHttp" class="security-note">
+          {{
+            isPasswordMode
+              ? "该地址使用明文 HTTP，账号密码会写入本机配置文件并在网络上明文传输。"
+              : "该地址使用明文 HTTP，访问令牌会写入本机配置文件并在网络上明文传输。"
+          }}
+        </p>
       </section>
 
       <section class="settings-section">
@@ -129,7 +171,7 @@ onMounted(load);
       <section class="settings-section compact">
         <h2>本地配置</h2>
         <code>{{ settings?.configPath }}</code>
-        <small>配置文件权限限制为 0600，访问令牌不会写入日志。</small>
+        <small>配置文件权限限制为 0600，令牌与账号密码不会写入日志。</small>
       </section>
 
       <p v-if="error" class="form-error">{{ error }}</p>

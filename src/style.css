@@ -64,7 +64,14 @@ svg {
 }
 
 .login-page {
+  height: 100vh;
+  overflow-y: auto;
   padding: 34px 32px 28px;
+  scrollbar-width: none;
+}
+
+.login-page::-webkit-scrollbar {
+  display: none;
 }
 
 .brand-lockup {
@@ -228,6 +235,65 @@ button:disabled {
 .inline-error {
   color: #a82e2e;
   background: rgba(223, 75, 75, 0.1);
+}
+
+/* 登录方式切换与方式标签 */
+.auth-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(120, 120, 128, 0.08);
+}
+
+.auth-mode-switch button {
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.auth-mode-switch button.active {
+  color: #1c1c1e;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mode-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mode-row small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.mode-badge {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(120, 120, 128, 0.08);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* Popover */
@@ -826,6 +892,11 @@ button:disabled {
 
   .primary-button:hover:not(:disabled) {
     background: #fff;
+  }
+
+  .auth-mode-switch button.active {
+    color: #171719;
+    background: #f2f2f4;
   }
 
   .secondary-button,
