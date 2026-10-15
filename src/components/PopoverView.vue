@@ -131,7 +131,7 @@ onUnmounted(() => {
       <div class="mini-brand" data-tauri-drag-region>
         <img src="/workbuddy.png" alt="" />
         <div data-tauri-drag-region>
-          <strong data-tauri-drag-region>WorkBuddy Manager</strong>
+          <strong data-tauri-drag-region>WorkBuddyBar</strong>
           <span :class="['status-dot', statusTone]" data-tauri-drag-region>{{ statusText }}</span>
         </div>
       </div>

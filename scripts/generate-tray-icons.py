@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate transparent tray variants from the WorkBuddy Manager favicon."""
+"""Generate transparent tray variants from the WorkBuddyBar favicon."""
 from io import BytesIO
 from pathlib import Path
 
