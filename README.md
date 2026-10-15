@@ -64,6 +64,9 @@ Windows 构建需要 Rust MSVC 工具链和 WebView2。安装包会输出到 `sr
 - `src-tauri/Cargo.toml`
 - `src-tauri/Cargo.lock`
 
+同时在 `CHANGELOG.md` 里补上该版本的段落（格式 `## [x.y.z] - YYYY-MM-DD`）。CI 会校验该段落存在，
+并把它自动截取为 GitHub Release 的更新内容，后面再附上固定的安装说明。
+
 提交版本变更后推送标签：
 
 ```bash

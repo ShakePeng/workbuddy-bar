@@ -120,6 +120,12 @@ jobs:
             exit 1
           fi
 
+          # 发布说明取自 CHANGELOG.md：缺段落就直接失败，不必浪费一次完整构建。
+          if ! grep -qE "^## \[${expected}\]" CHANGELOG.md; then
+            echo "CHANGELOG.md 中缺少 ${expected} 的更新日志，请补充后再打标签" >&2
+            exit 1
+          fi
+
       # Windows 上再跑一遍 cargo test，等于用 dev profile 把 500+ crate 重编一次
       # （实测 7 分 18 秒），所以测试只在 macOS 跑一遍；Windows 专属的编译问题
       # 仍会由下面的 release 构建暴露。
@@ -186,6 +192,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download installers
         uses: actions/download-artifact@v4
         with:
@@ -201,17 +210,46 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -type f -name '*.exe' -print -quit)"
           find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
 
+      # 更新内容取自 CHANGELOG.md 中该版本的段落，后面固定附上安装说明。
+      - name: Build release notes
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          version="${TAG_NAME#v}"
+          notes="$(awk -v version="$version" '
+            $0 ~ "^## \\[" version "\\]" { inside = 1; next }
+            inside && /^## \[/ { exit }
+            inside { print }
+          ' CHANGELOG.md)"
+
+          if [[ -z "${notes//[[:space:]]/}" ]]; then
+            echo "CHANGELOG.md 中找不到 ${version} 的更新日志" >&2
+            exit 1
+          fi
+
+          {
+            echo "## ${TAG_NAME} 更新内容"
+            echo
+            echo "$notes"
+            echo
+            echo "## 安装说明"
+            echo
+            echo "- macOS Apple Silicon：下载 DMG 后安装。当前版本未签名、未公证；首次打开若被 Gatekeeper 拦截，请右键应用并选择“打开”，或执行："
+            echo '  `xattr -dr com.apple.quarantine /Applications/WorkBuddyBar.app`'
+            echo "- Windows x64：下载 NSIS 安装包。若出现 SmartScreen 提示，请选择“更多信息”后点击“仍要运行”。"
+          } > RELEASE_BODY.md
+
+          cat RELEASE_BODY.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: WorkBuddyBar ${{ github.ref_name }}
-          body: |
-            ## 安装说明
-
-            - macOS Apple Silicon：下载 DMG 后安装。当前版本未签名、未公证；首次打开若被 Gatekeeper 拦截，请右键应用并选择“打开”，或执行：
-              `xattr -dr com.apple.quarantine /Applications/WorkBuddyBar.app`
-            - Windows x64：下载 NSIS 安装包。若出现 SmartScreen 提示，请选择“更多信息”后点击“仍要运行”。
+          body_path: RELEASE_BODY.md
           files: release-assets/*
           fail_on_unmatched_files: true
         env:
