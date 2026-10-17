@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WorkBuddyBar",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "identifier": "cn.shakepeng.workbuddybar",
   "build": {
     "beforeDevCommand": "yarn dev",
@@ -30,7 +30,7 @@
         "label": "popover",
         "title": "WorkBuddyBar",
         "url": "index.html?view=popover",
-        "width": 400,
+        "width": 720,
         "height": 700,
         "resizable": false,
         "decorations": false,
@@ -44,12 +44,12 @@
         "label": "settings",
         "title": "WorkBuddyBar 设置",
         "url": "index.html?view=settings",
-        "width": 500,
-        "height": 940,
-        "minWidth": 500,
-        "minHeight": 940,
-        "maxWidth": 500,
-        "maxHeight": 940,
+        "width": 720,
+        "height": 700,
+        "minWidth": 720,
+        "minHeight": 700,
+        "maxWidth": 720,
+        "maxHeight": 700,
         "resizable": false,
         "center": true,
         "visible": false
@@ -59,8 +59,17 @@
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; script-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI1M0ZDMzk0QTc5RTQ4OEYKUldTUFNKNm5sTU0vdGUwcFJ0dlV1SU9sN2w1d0pVclI1cktpakhRUnEzODJ5NHNDQWV2SVM2K2EK",
+      "endpoints": [
+        "https://github.com/ShakePeng/workbuddy-bar/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "category": "Utility",
     "icon": [
