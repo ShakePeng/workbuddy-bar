@@ -263,6 +263,41 @@ jobs:
             exit 1
           fi
 
+          asset_win="WorkBuddyBar-${TAG_NAME}-windows-x64-setup.exe"
+          asset_mac="WorkBuddyBar-${TAG_NAME}-macos-aarch64.dmg"
+          asset_app="WorkBuddyBar-${TAG_NAME}-macos-aarch64.app.zip"
+          test -f "release-assets/${asset_win}"
+          test -f "release-assets/${asset_mac}"
+          test -f "release-assets/${asset_app}"
+
+          VERSION="$version" TAG_NAME="$TAG_NAME" NOTES="$notes" \
+            ASSET_WIN="$asset_win" ASSET_MAC="$asset_mac" \
+            python3 - <<'PY'
+          import json
+          import os
+
+          manifest = {
+              "version": os.environ["VERSION"],
+              "tag": os.environ["TAG_NAME"],
+              "notes": os.environ["NOTES"],
+              "assets": {
+                  "windows-x64": os.environ["ASSET_WIN"],
+                  "macos-aarch64": os.environ["ASSET_MAC"],
+              },
+          }
+          path = "release-assets/latest.json"
+          with open(path, "w", encoding="utf-8") as handle:
+              json.dump(manifest, handle, ensure_ascii=False, indent=2)
+              handle.write("\n")
+
+          with open(path, encoding="utf-8") as handle:
+              written = json.load(handle)
+          assert written["version"] == os.environ["VERSION"]
+          assert written["tag"] == os.environ["TAG_NAME"]
+          for name in written["assets"].values():
+              assert os.path.isfile(os.path.join("release-assets", name))
+          PY
+
           {
             echo "## ${TAG_NAME} 更新内容"
             echo

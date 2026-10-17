@@ -1666,8 +1666,10 @@ fn open_settings(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/ShakePeng/workbuddy-bar/releases/latest";
+const UPDATE_MANIFEST_URL: &str =
+    "https://github.com/ShakePeng/workbuddy-bar/releases/latest/download/latest.json";
+const UPDATE_RELEASE_DOWNLOAD_BASE: &str =
+    "https://github.com/ShakePeng/workbuddy-bar/releases/download";
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const UPDATE_READ_TIMEOUT: Duration = Duration::from_secs(60);
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(20);
@@ -1692,6 +1694,24 @@ struct UpdateInfo {
     notes: String,
     download_url: String,
     file_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateManifest {
+    version: String,
+    tag: String,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    assets: HashMap<String, String>,
+}
+
+fn update_asset_for_platform<'a>(manifest: &'a UpdateManifest, platform: &str) -> Option<&'a str> {
+    manifest
+        .assets
+        .get(platform)
+        .map(String::as_str)
+        .filter(|name| !name.trim().is_empty())
 }
 
 // 与官方更新器一致的事件结构，前端按 event 字段区分阶段。
@@ -1738,46 +1758,56 @@ fn is_newer_version(remote: &str, current: &str) -> bool {
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
     let client = update_http_client(Some(UPDATE_CHECK_TIMEOUT))?;
-    let release: Value = client
-        .get(GITHUB_LATEST_RELEASE_API)
+    let response = client
+        .get(UPDATE_MANIFEST_URL)
         .send()
         .await
-        .map_err(|error| format!("请求更新信息失败：{error}"))?
+        .map_err(|error| format!("请求更新信息失败：{error}"))?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err("未找到更新清单，请前往 Release 页面手动下载".into());
+    }
+    let manifest: UpdateManifest = response
         .error_for_status()
         .map_err(|error| format!("请求更新信息失败：{error}"))?
         .json()
         .await
         .map_err(|error| format!("解析更新信息失败：{error}"))?;
 
-    let tag = value_string(release.get("tag_name"));
     let current = app.package_info().version.to_string();
-    if !is_newer_version(&tag, &current) {
+    if !is_newer_version(&manifest.version, &current) {
         return Ok(None);
     }
 
-    let installer_suffix = if cfg!(target_os = "windows") {
-        "windows-x64-setup.exe"
+    let platform = if cfg!(target_os = "windows") {
+        "windows-x64"
     } else if cfg!(target_os = "macos") {
-        "macos-aarch64.dmg"
+        "macos-aarch64"
     } else {
         return Ok(None);
     };
-    let assets = release
-        .get("assets")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let Some(asset) = assets.iter().find(|asset| {
-        value_string(asset.get("name")).ends_with(installer_suffix)
-    }) else {
+    let Some(file_name) = update_asset_for_platform(&manifest, platform) else {
         return Ok(None);
     };
+    if file_name.contains('/') || file_name.contains('\\') {
+        return Err("更新清单中的安装包名称无效".into());
+    }
+    let file_name = file_name.to_string();
+    let tag = if manifest.tag.trim().is_empty() {
+        format!("v{}", manifest.version.trim())
+    } else {
+        manifest.tag.trim().to_string()
+    };
+    let download_url = format!("{UPDATE_RELEASE_DOWNLOAD_BASE}/{tag}/{file_name}");
 
     Ok(Some(UpdateInfo {
-        version: tag.trim_start_matches(['v', 'V']).to_string(),
-        notes: value_string(release.get("body")),
-        download_url: value_string(asset.get("browser_download_url")),
-        file_name: value_string(asset.get("name")),
+        version: manifest
+            .version
+            .trim()
+            .trim_start_matches(['v', 'V'])
+            .to_string(),
+        notes: manifest.notes,
+        download_url,
+        file_name,
     }))
 }
 
@@ -2107,6 +2137,32 @@ mod tests {
         assert!(!is_newer_version("v1.0.7", "1.0.7"));
         assert!(!is_newer_version("1.0.6", "1.0.7"));
         assert!(!is_newer_version("v1.0", "1.0.7"));
+    }
+
+    #[test]
+    fn parses_update_manifest_and_selects_platform_asset() {
+        let manifest: UpdateManifest = serde_json::from_value(json!({
+            "version": "1.0.10",
+            "tag": "v1.0.10",
+            "notes": "修复更新检测限流",
+            "assets": {
+                "windows-x64": "WorkBuddyBar-v1.0.10-windows-x64-setup.exe",
+                "macos-aarch64": "WorkBuddyBar-v1.0.10-macos-aarch64.dmg"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(manifest.version, "1.0.10");
+        assert_eq!(manifest.tag, "v1.0.10");
+        assert_eq!(
+            update_asset_for_platform(&manifest, "windows-x64"),
+            Some("WorkBuddyBar-v1.0.10-windows-x64-setup.exe")
+        );
+        assert_eq!(
+            update_asset_for_platform(&manifest, "macos-aarch64"),
+            Some("WorkBuddyBar-v1.0.10-macos-aarch64.dmg")
+        );
+        assert_eq!(update_asset_for_platform(&manifest, "linux-x64"), None);
     }
 
     #[test]
