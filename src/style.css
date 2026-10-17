@@ -727,20 +727,22 @@ button:disabled {
 }
 
 .expiring-badge {
-  padding: 1px 4px;
-  border-radius: 4px;
-  color: #b45309;
-  font-size: 8px;
+  color: inherit;
+  font-size: 9.5px;
   font-style: normal;
   font-weight: 650;
   white-space: nowrap;
+}
+
+.expiring-badge.urgent {
+  color: var(--red);
 }
 
 .account-main small {
   display: block;
   margin-top: 2px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10.5px;
 }
 
 .account-credit {
@@ -1073,8 +1075,8 @@ button:disabled {
     background: rgba(255, 255, 255, 0.14);
   }
 
-  .expiring-badge {
-    color: #fbbf24;
+  .expiring-badge.urgent {
+    color: #f87171;
   }
 
   .metric-grid > div {

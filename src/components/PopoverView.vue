@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppSnapshot } from "../types";
+import type { AccountView, AppSnapshot } from "../types";
 import { useToast } from "../composables/useToast";
 import { useUpdater } from "../composables/useUpdater";
 import {
@@ -22,6 +22,7 @@ const actionError = ref("");
 const content = ref<HTMLElement | null>(null);
 let unlisten: UnlistenFn | undefined;
 let resizeTimer = 0;
+const EXPIRY_REMINDER_DAYS = 2;
 
 const {
   status: updateStatus,
@@ -100,13 +101,36 @@ const keyUsageTotal = computed(() =>
     { todayTokens: 0, totalTokens: 0 },
   ),
 );
-function accountExpiringDays(expiresAt: number | null, isExpired: boolean): number | null {
-  if (!expiresAt || isExpired) return null;
-  const reminderDays = snapshot.value?.expiryReminderDays ?? 2;
-  if (reminderDays <= 0) return null;
-  const remaining = expiresAt - Math.floor(Date.now() / 1000);
-  if (remaining <= 0 || remaining > reminderDays * 24 * 60 * 60) return null;
-  return Math.max(1, Math.ceil(remaining / (24 * 60 * 60)));
+function nextCreditExpiry(account: AccountView) {
+  return account.creditExpiries?.[0] ?? null;
+}
+
+function creditExpiryLabel(account: AccountView): string | null {
+  const expiry = nextCreditExpiry(account);
+  if (!expiry) return null;
+  const remaining = expiry.at - Math.floor(Date.now() / 1000);
+  if (remaining <= 0) return "已到期";
+  if (remaining < 60) return "即将到期";
+  if (remaining < 3600) return `${Math.floor(remaining / 60)}分钟后到期`;
+  if (remaining < 86400) return `${Math.floor(remaining / 3600)}小时后到期`;
+  return `${Math.floor(remaining / 86400)}天后到期`;
+}
+
+function creditExpiryUrgent(account: AccountView): boolean {
+  const expiry = nextCreditExpiry(account);
+  if (!expiry) return false;
+  const reminderDays = EXPIRY_REMINDER_DAYS;
+  if (reminderDays <= 0) return false;
+  const remaining = expiry.at - Math.floor(Date.now() / 1000);
+  return remaining > 0 && remaining <= reminderDays * 24 * 60 * 60;
+}
+
+function creditExpiryTitle(account: AccountView): string {
+  const expiries = account.creditExpiries ?? [];
+  const lines = expiries.map(
+    (expiry) => `${formatCredits(expiry.amount)} · ${formatReset(expiry.at)}`,
+  );
+  return lines.length ? lines.join("\n") : "暂无积分到期明细";
 }
 
 async function resizeToContent() {
@@ -260,8 +284,12 @@ onUnmounted(() => {
               <div class="account-name">
                 <span>{{ account.nickname }}</span>
                 <i :class="account.realm === 'global' ? 'realm global' : 'realm'">{{ realmLabel(account.realm) }}</i>
-                <i v-if="accountExpiringDays(account.expiresAt, account.isExpired) != null" class="expiring-badge">
-                {{ accountExpiringDays(account.expiresAt, account.isExpired) }}天内到期积分{{ formatCredits(account.credits) }}
+                <i
+                  v-if="creditExpiryLabel(account) != null"
+                  :class="['expiring-badge', { urgent: creditExpiryUrgent(account) }]"
+                  :title="creditExpiryTitle(account)"
+                >
+                  {{ formatCredits(nextCreditExpiry(account)?.amount) }} · {{ creditExpiryLabel(account) }}
                 </i>
               </div>
             <small>

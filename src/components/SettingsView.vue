@@ -20,7 +20,6 @@ const form = ref<SettingsInput>({
   refreshIntervalSec: 120,
   lowCreditThreshold: 1000,
   launchAtLogin: false,
-  expiryReminderDays: 2,
 });
 const showToken = ref(false);
 const showPassword = ref(false);
@@ -69,7 +68,6 @@ async function load() {
       refreshIntervalSec: value.refreshIntervalSec,
       lowCreditThreshold: value.lowCreditThreshold,
       launchAtLogin: value.launchAtLogin,
-    expiryReminderDays: value.expiryReminderDays,
     };
   } catch (reason) {
     error.value = String(reason);
@@ -194,11 +192,6 @@ onMounted(async () => {
         <label>
           <span>低积分界面阈值</span>
           <input v-model.number="form.lowCreditThreshold" type="number" min="0" step="100" required />
-        </label>
-        <label>
-          <span>快过期提醒（天）</span>
-          <input v-model.number="form.expiryReminderDays" type="number" min="0" max="365" step="1" required />
-          <small>到期前 N 天在账号明细中显示提醒，0 表示关闭</small>
         </label>
         <label class="switch-row">
           <span>

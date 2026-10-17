@@ -1,6 +1,6 @@
 [package]
 name = "workbuddy-bar"
-version = "1.0.7"
+version = "1.0.8"
 description = "WorkBuddyBar menu bar monitor"
 authors = ["ShakePeng"]
 edition = "2021"
