@@ -30,6 +30,7 @@ const {
   status: updateStatus,
   version: updateVersion,
   notes: updateNotes,
+  selfUpdate: updateSelfUpdate,
   progressPercent: updateProgressPercent,
   progressLabel: updateProgressLabel,
   savedPath: updateSavedPath,
@@ -38,7 +39,10 @@ const {
   downloadUpdate,
 } = useUpdater();
 const updateBusy = computed(
-  () => updateStatus.value == "checking" || updateStatus.value == "downloading",
+  () =>
+    updateStatus.value == "checking" ||
+    updateStatus.value == "downloading" ||
+    updateStatus.value == "installing",
 );
 const { message: toastMessage, kind: toastKind, show: showToast } = useToast();
 const persistentError = computed(() => actionError.value || snapshot.value?.error || "");
@@ -342,7 +346,12 @@ onUnmounted(() => {
     </div>
 
     <section
-      v-if="updateStatus == 'available' || updateStatus == 'downloading'"
+      v-if="
+        updateStatus == 'available' ||
+        updateStatus == 'downloading' ||
+        updateStatus == 'installing' ||
+        updateStatus == 'downloaded'
+      "
       class="section-card update-card"
     >
       <template v-if="updateStatus == 'available'">
@@ -351,7 +360,9 @@ onUnmounted(() => {
           <b>v{{ updateVersion }}</b>
         </div>
         <p v-if="updateNotes" class="update-notes">{{ updateNotes }}</p>
-        <button class="primary-button update-button" type="button" @click="downloadUpdate">下载最新版本</button>
+        <button class="primary-button update-button" type="button" @click="downloadUpdate">
+          {{ updateSelfUpdate ? "更新并重启" : "下载最新版本" }}
+        </button>
       </template>
       <div v-else-if="updateStatus == 'downloading'" class="update-progress">
         <div class="update-head">
@@ -359,6 +370,12 @@ onUnmounted(() => {
           <b>{{ updateProgressPercent }}%</b>
         </div>
         <div class="progress-track"><i :style="{ width: `${updateProgressPercent}%` }"></i></div>
+        <small>{{ updateProgressLabel }}</small>
+      </div>
+      <div v-else-if="updateStatus == 'installing'" class="update-progress">
+        <div class="update-head">
+          <span>正在安装并重启</span>
+        </div>
         <small>{{ updateProgressLabel }}</small>
       </div>
       <div v-else-if="updateStatus == 'downloaded'" class="update-progress">

@@ -7,6 +7,7 @@ export type UpdaterStatus =
   | "up-to-date"
   | "available"
   | "downloading"
+  | "installing"
   | "downloaded"
   | "error";
 
@@ -15,6 +16,16 @@ interface UpdateInfo {
   notes: string;
   downloadUrl: string;
   fileName: string;
+  sha256: string | null;
+  selfUpdate: boolean;
+  manualDownloadUrl: string | null;
+  manualFileName: string | null;
+}
+
+interface InstallResult {
+  installed: boolean;
+  manualRequired: boolean;
+  savedPath: string | null;
 }
 
 type DownloadEvent =
@@ -32,6 +43,7 @@ export function useUpdater() {
   const status = ref<UpdaterStatus>("idle");
   const version = ref("");
   const notes = ref("");
+  const selfUpdate = ref(false);
   const downloaded = ref(0);
   const total = ref(0);
   const savedPath = ref("");
@@ -45,6 +57,7 @@ export function useUpdater() {
     return 0;
   });
   const progressLabel = computed(() => {
+    if (status.value == "installing") return "正在安装并重启…";
     if (total.value > 0) return `${formatBytes(downloaded.value)} / ${formatBytes(total.value)}`;
     if (downloaded.value > 0) return `已下载 ${formatBytes(downloaded.value)}`;
     return "连接中…";
@@ -55,6 +68,7 @@ export function useUpdater() {
     error.value = "";
     version.value = "";
     notes.value = "";
+    selfUpdate.value = false;
     savedPath.value = "";
     downloaded.value = 0;
     total.value = 0;
@@ -68,6 +82,7 @@ export function useUpdater() {
       pendingUpdate = update;
       version.value = update.version;
       notes.value = update.notes;
+      selfUpdate.value = update.selfUpdate;
       status.value = "available";
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason);
@@ -94,6 +109,25 @@ export function useUpdater() {
           downloaded.value += event.chunkLength;
         }
       };
+      if (update.selfUpdate && update.sha256) {
+        const result = await invoke<InstallResult>("install_update", {
+          url: update.downloadUrl,
+          fileName: update.fileName,
+          sha256: update.sha256,
+          onEvent: channel,
+        });
+        if (result.installed) {
+          status.value = "installing";
+          return;
+        }
+      }
+      if (update.manualDownloadUrl) {
+        await downloadManual(
+          update.manualDownloadUrl,
+          update.manualFileName ?? update.fileName,
+        );
+        return;
+      }
       savedPath.value = await invoke<string>("download_update", {
         url: update.downloadUrl,
         fileName: update.fileName,
@@ -107,10 +141,29 @@ export function useUpdater() {
     }
   }
 
+  async function downloadManual(url: string, fileName: string) {
+    const channel = new Channel<DownloadEvent>();
+    channel.onmessage = (event) => {
+      if (event.event == "Started") {
+        total.value = event.contentLength ?? 0;
+      } else if (event.event == "Progress") {
+        downloaded.value += event.chunkLength;
+      }
+    };
+    savedPath.value = await invoke<string>("download_update", {
+      url,
+      fileName,
+      onEvent: channel,
+    });
+    status.value = "downloaded";
+    await invoke("reveal_path", { path: savedPath.value });
+  }
+
   return {
     status,
     version,
     notes,
+    selfUpdate,
     progressPercent,
     progressLabel,
     savedPath,

@@ -2,10 +2,13 @@ use reqwest::header::{HeaderMap, COOKIE, SET_COOKIE};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(target_os = "macos")]
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1668,6 +1671,8 @@ fn open_settings(app: AppHandle) -> Result<(), String> {
 
 const UPDATE_MANIFEST_URL: &str =
     "https://github.com/ShakePeng/workbuddy-bar/releases/latest/download/latest.json";
+const UPDATE_MANIFEST_V2_URL: &str =
+    "https://github.com/ShakePeng/workbuddy-bar/releases/latest/download/latest-v2.json";
 const UPDATE_RELEASE_DOWNLOAD_BASE: &str =
     "https://github.com/ShakePeng/workbuddy-bar/releases/download";
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -1694,6 +1699,10 @@ struct UpdateInfo {
     notes: String,
     download_url: String,
     file_name: String,
+    sha256: Option<String>,
+    self_update: bool,
+    manual_download_url: Option<String>,
+    manual_file_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1706,12 +1715,46 @@ struct UpdateManifest {
     assets: HashMap<String, String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateAssetV2 {
+    file: String,
+    #[serde(default)]
+    sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateManifestV2 {
+    version: String,
+    tag: String,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    assets: HashMap<String, UpdateAssetV2>,
+    #[serde(default)]
+    manual: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInstallResult {
+    installed: bool,
+    manual_required: bool,
+    saved_path: Option<String>,
+}
+
 fn update_asset_for_platform<'a>(manifest: &'a UpdateManifest, platform: &str) -> Option<&'a str> {
     manifest
         .assets
         .get(platform)
         .map(String::as_str)
         .filter(|name| !name.trim().is_empty())
+}
+
+fn update_asset_v2_for_platform<'a>(
+    manifest: &'a UpdateManifestV2,
+    platform: &str,
+) -> Option<&'a UpdateAssetV2> {
+    manifest.assets.get(platform)
 }
 
 // 与官方更新器一致的事件结构，前端按 event 字段区分阶段。
@@ -1759,6 +1802,23 @@ fn is_newer_version(remote: &str, current: &str) -> bool {
 async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
     let client = update_http_client(Some(UPDATE_CHECK_TIMEOUT))?;
     let response = client
+        .get(UPDATE_MANIFEST_V2_URL)
+        .send()
+        .await
+        .map_err(|error| format!("请求更新信息失败：{error}"))?;
+    let current = app.package_info().version.to_string();
+    if response.status().is_success() {
+        let manifest: UpdateManifestV2 = response
+            .json()
+            .await
+            .map_err(|error| format!("解析更新信息失败：{error}"))?;
+        return Ok(update_info_from_v2(&manifest, &current));
+    }
+    if response.status() != StatusCode::NOT_FOUND {
+        return Err(format!("请求更新信息失败：HTTP {}", response.status()));
+    }
+
+    let response = client
         .get(UPDATE_MANIFEST_URL)
         .send()
         .await
@@ -1773,42 +1833,99 @@ async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
         .await
         .map_err(|error| format!("解析更新信息失败：{error}"))?;
 
-    let current = app.package_info().version.to_string();
-    if !is_newer_version(&manifest.version, &current) {
-        return Ok(None);
-    }
+    Ok(update_info_from_legacy(&manifest, &current))
+}
 
-    let platform = if cfg!(target_os = "windows") {
-        "windows-x64"
+fn update_platform_key() -> Option<&'static str> {
+    if cfg!(target_os = "windows") {
+        Some("windows-x64")
     } else if cfg!(target_os = "macos") {
-        "macos-aarch64"
+        Some("macos-aarch64")
     } else {
-        return Ok(None);
-    };
-    let Some(file_name) = update_asset_for_platform(&manifest, platform) else {
-        return Ok(None);
-    };
-    if file_name.contains('/') || file_name.contains('\\') {
-        return Err("更新清单中的安装包名称无效".into());
+        None
     }
-    let file_name = file_name.to_string();
-    let tag = if manifest.tag.trim().is_empty() {
-        format!("v{}", manifest.version.trim())
-    } else {
-        manifest.tag.trim().to_string()
-    };
-    let download_url = format!("{UPDATE_RELEASE_DOWNLOAD_BASE}/{tag}/{file_name}");
+}
 
-    Ok(Some(UpdateInfo {
+fn release_asset_url(tag: &str, file_name: &str) -> String {
+    format!("{UPDATE_RELEASE_DOWNLOAD_BASE}/{tag}/{file_name}")
+}
+
+fn manifest_tag(tag: &str, version: &str) -> String {
+    if tag.trim().is_empty() {
+        format!("v{}", version.trim())
+    } else {
+        tag.trim().to_string()
+    }
+}
+
+fn is_valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn update_info_from_v2(manifest: &UpdateManifestV2, current: &str) -> Option<UpdateInfo> {
+    if !is_newer_version(&manifest.version, current) {
+        return None;
+    }
+    let platform = update_platform_key()?;
+    let tag = manifest_tag(&manifest.tag, &manifest.version);
+    let manual_file = manifest.manual.get(platform);
+    let asset = update_asset_v2_for_platform(manifest, platform);
+    let (download_url, file_name, sha256, self_update) =
+        if let Some(asset) = asset.filter(|asset| is_valid_sha256(&asset.sha256)) {
+            (
+                release_asset_url(&tag, &asset.file),
+                asset.file.clone(),
+                Some(asset.sha256.clone()),
+                true,
+            )
+        } else if let Some(file) = manual_file {
+            (release_asset_url(&tag, file), file.clone(), None, false)
+        } else {
+            return None;
+        };
+    let manual_download_url = manual_file.map(|file| release_asset_url(&tag, file));
+    let manual_file_name = manual_file.cloned();
+    Some(UpdateInfo {
         version: manifest
             .version
             .trim()
             .trim_start_matches(['v', 'V'])
             .to_string(),
-        notes: manifest.notes,
+        notes: manifest.notes.clone(),
         download_url,
         file_name,
-    }))
+        sha256,
+        self_update,
+        manual_download_url,
+        manual_file_name,
+    })
+}
+
+fn update_info_from_legacy(manifest: &UpdateManifest, current: &str) -> Option<UpdateInfo> {
+    if !is_newer_version(&manifest.version, current) {
+        return None;
+    }
+    let platform = update_platform_key()?;
+    let file_name = update_asset_for_platform(manifest, platform)?;
+    if file_name.contains('/') || file_name.contains('\\') {
+        return None;
+    }
+    let tag = manifest_tag(&manifest.tag, &manifest.version);
+    let download_url = release_asset_url(&tag, file_name);
+    Some(UpdateInfo {
+        version: manifest
+            .version
+            .trim()
+            .trim_start_matches(['v', 'V'])
+            .to_string(),
+        notes: manifest.notes.clone(),
+        download_url: download_url.clone(),
+        file_name: file_name.to_string(),
+        sha256: None,
+        self_update: false,
+        manual_download_url: Some(download_url),
+        manual_file_name: Some(file_name.to_string()),
+    })
 }
 
 #[tauri::command]
@@ -1818,9 +1935,109 @@ async fn download_update(
     file_name: String,
     on_event: Channel<UpdateDownloadEvent>,
 ) -> Result<String, String> {
+    let safe_name = safe_update_file_name(&file_name)?;
+    let download_dir = app
+        .path()
+        .download_dir()
+        .map_err(|error| format!("定位下载文件夹失败：{error}"))?;
+    let target = download_dir.join(safe_name);
+    download_to_file(&url, &target, None, &on_event).await?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn install_update(
+    app: AppHandle,
+    url: String,
+    file_name: String,
+    sha256: String,
+    on_event: Channel<UpdateDownloadEvent>,
+) -> Result<UpdateInstallResult, String> {
+    if !is_valid_sha256(&sha256) {
+        return Err("更新清单缺少有效的 SHA256".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    let app_bundle = match macos_app_bundle_path() {
+        Ok(path) => path,
+        Err(_) => {
+            return Ok(UpdateInstallResult {
+                installed: false,
+                manual_required: true,
+                saved_path: None,
+            });
+        }
+    };
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        return Ok(UpdateInstallResult {
+            installed: false,
+            manual_required: true,
+            saved_path: None,
+        });
+    }
+
+    let safe_name = safe_update_file_name(&file_name)?;
+    let temp_dir = std::env::temp_dir().join(format!("workbuddybar-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).map_err(|error| format!("创建更新临时目录失败：{error}"))?;
+    let target = temp_dir.join(safe_name);
+    if let Err(error) = download_to_file(&url, &target, Some(&sha256), &on_event).await {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return Err(error);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new(&target)
+            .args(["/S", "/R"])
+            .spawn()
+            .map_err(|error| format!("启动安装包失败：{error}"))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script_path = temp_dir.join("install-update.sh");
+        std::fs::write(&script_path, MACOS_UPDATE_SCRIPT)
+            .map_err(|error| format!("创建 macOS 更新脚本失败：{error}"))?;
+        Command::new("/bin/bash")
+            .arg(&script_path)
+            .arg(&target)
+            .arg(&app_bundle)
+            .arg(std::process::id().to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("启动 macOS 更新脚本失败：{error}"))?;
+    }
+
+    schedule_app_exit(app);
+    Ok(UpdateInstallResult {
+        installed: true,
+        manual_required: false,
+        saved_path: Some(target.to_string_lossy().to_string()),
+    })
+}
+
+fn safe_update_file_name(file_name: &str) -> Result<String, String> {
+    Path::new(file_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "安装包文件名无效".to_string())
+}
+
+async fn download_to_file(
+    url: &str,
+    target: &Path,
+    expected_sha256: Option<&str>,
+    on_event: &Channel<UpdateDownloadEvent>,
+) -> Result<(), String> {
     let client = update_http_client(None)?;
     let mut response = client
-        .get(&url)
+        .get(url)
         .send()
         .await
         .map_err(|error| format!("下载失败：{error}"))?
@@ -1833,16 +2050,6 @@ async fn download_update(
         })
         .map_err(|error| format!("发送下载进度失败：{error}"))?;
 
-    // 文件名只取末段路径，避免远端名称带目录造成路径穿越。
-    let safe_name = std::path::Path::new(&file_name)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .ok_or_else(|| "安装包文件名无效".to_string())?;
-    let download_dir = app
-        .path()
-        .download_dir()
-        .map_err(|error| format!("定位下载文件夹失败：{error}"))?;
-    let target = download_dir.join(safe_name);
     let partial = target.with_extension(format!(
         "{}.part",
         target
@@ -1853,6 +2060,7 @@ async fn download_update(
     let mut file = tokio::fs::File::create(&partial)
         .await
         .map_err(|error| format!("创建安装包文件失败：{error}"))?;
+    let mut hasher = expected_sha256.map(|_| Sha256::new());
 
     let download_result: Result<(), String> = async {
         while let Some(chunk) = response
@@ -1863,6 +2071,9 @@ async fn download_update(
             file.write_all(&chunk)
                 .await
                 .map_err(|error| format!("写入安装包失败：{error}"))?;
+            if let Some(hasher) = hasher.as_mut() {
+                hasher.update(&chunk);
+            }
             on_event
                 .send(UpdateDownloadEvent::Progress {
                     chunk_length: chunk.len() as u64,
@@ -1881,6 +2092,13 @@ async fn download_update(
         return Err(error);
     }
     drop(file);
+    if let (Some(expected), Some(hasher)) = (expected_sha256, hasher) {
+        let actual = hex_encode(&hasher.finalize());
+        if !actual.eq_ignore_ascii_case(expected.trim()) {
+            let _ = tokio::fs::remove_file(&partial).await;
+            return Err("安装包 SHA256 校验失败".into());
+        }
+    }
     if tokio::fs::try_exists(&target).await.unwrap_or(false) {
         tokio::fs::remove_file(&target)
             .await
@@ -1893,8 +2111,124 @@ async fn download_update(
         .send(UpdateDownloadEvent::Finished)
         .map_err(|error| format!("发送下载进度失败：{error}"))?;
 
-    Ok(target.to_string_lossy().to_string())
+    Ok(())
 }
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut result = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        result.push(HEX[(byte >> 4) as usize] as char);
+        result.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    result
+}
+
+fn schedule_app_exit(app: AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(600));
+        app.state::<AppState>()
+            .quitting
+            .store(true, Ordering::Relaxed);
+        app.exit(0);
+    });
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn app_bundle_from_executable(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|part| part.extension().map(|ext| ext == "app").unwrap_or(false))
+        .map(Path::to_path_buf)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_bundle_path() -> Result<PathBuf, String> {
+    let executable =
+        std::env::current_exe().map_err(|error| format!("定位当前应用失败：{error}"))?;
+    let bundle = app_bundle_from_executable(&executable)
+        .ok_or_else(|| "当前应用不在 .app 包中，无法自动更新".to_string())?;
+    let text = bundle.to_string_lossy();
+    if text.contains("AppTranslocation") || bundle.starts_with("/Volumes") {
+        return Err("当前应用从临时位置运行，无法自动更新".into());
+    }
+    let parent = bundle
+        .parent()
+        .ok_or_else(|| "无法定位应用安装目录".to_string())?;
+    let probe = parent.join(format!(".workbuddybar-update-probe-{}", std::process::id()));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .map_err(|_| "当前安装目录不可写，无法自动更新".to_string())?;
+    let _ = std::fs::remove_file(&probe);
+    Ok(bundle)
+}
+
+#[cfg(target_os = "macos")]
+const MACOS_UPDATE_SCRIPT: &str = r#"#!/bin/bash
+set -u
+
+ZIP="$1"
+APP="$2"
+PID="$3"
+LOG="$HOME/Library/Logs/WorkBuddyBar-update.log"
+mkdir -p "$(dirname "$LOG")"
+exec >>"$LOG" 2>&1
+
+echo "[$(date)] waiting for app $PID to exit"
+while kill -0 "$PID" 2>/dev/null; do
+  sleep 0.2
+done
+sleep 0.3
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/workbuddybar-update.XXXXXX")" || {
+  /usr/bin/open "$APP" >/dev/null 2>&1 || true
+  exit 1
+}
+BACKUP="${APP}.bak.$$"
+mkdir -p "$WORK/unpack"
+
+restore_old() {
+  rm -rf "$APP"
+  if [ -d "$BACKUP" ]; then
+    mv "$BACKUP" "$APP"
+  fi
+  /usr/bin/open "$APP" >/dev/null 2>&1 || true
+}
+
+echo "[$(date)] backing up $APP"
+if ! mv "$APP" "$BACKUP"; then
+  echo "[$(date)] backup failed"
+  /usr/bin/open "$APP" >/dev/null 2>&1 || true
+  exit 1
+fi
+
+echo "[$(date)] unpacking $ZIP"
+if ! /usr/bin/ditto -x -k "$ZIP" "$WORK/unpack"; then
+  echo "[$(date)] unzip failed"
+  restore_old
+  exit 1
+fi
+
+NEW_APP="$WORK/unpack/WorkBuddyBar.app"
+if [ ! -d "$NEW_APP" ]; then
+  echo "[$(date)] new app bundle missing"
+  restore_old
+  exit 1
+fi
+
+if ! mv "$NEW_APP" "$APP"; then
+  echo "[$(date)] replace failed"
+  restore_old
+  exit 1
+fi
+
+/usr/bin/xattr -dr com.apple.quarantine "$APP" >/dev/null 2>&1 || true
+echo "[$(date)] update installed"
+/usr/bin/open "$APP" >/dev/null 2>&1 || true
+rm -rf "$BACKUP" "$WORK" "$ZIP"
+rm -f "$0"
+"#;
 
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
@@ -2108,6 +2442,7 @@ pub fn run() {
             resize_popover,
             check_update,
             download_update,
+            install_update,
             reveal_path,
             open_manager,
             quit_app
@@ -2163,6 +2498,75 @@ mod tests {
             Some("WorkBuddyBar-v1.0.10-macos-aarch64.dmg")
         );
         assert_eq!(update_asset_for_platform(&manifest, "linux-x64"), None);
+        if let Some(info) = update_info_from_legacy(&manifest, "1.0.9") {
+            assert!(!info.self_update);
+            assert!(info.manual_download_url.is_some());
+        }
+    }
+
+    #[test]
+    fn parses_v2_manifest_and_selects_self_update_asset() {
+        let manifest: UpdateManifestV2 = serde_json::from_value(json!({
+            "version": "1.1.0",
+            "tag": "v1.1.0",
+            "notes": "静默自更新",
+            "assets": {
+                "windows-x64": {
+                    "file": "WorkBuddyBar-v1.1.0-windows-x64-setup.exe",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "macos-aarch64": {
+                    "file": "WorkBuddyBar-v1.1.0-macos-aarch64.app.zip",
+                    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+            },
+            "manual": {
+                "windows-x64": "WorkBuddyBar-v1.1.0-windows-x64-setup.exe",
+                "macos-aarch64": "WorkBuddyBar-v1.1.0-macos-aarch64.dmg"
+            }
+        }))
+        .unwrap();
+
+        let windows = update_asset_v2_for_platform(&manifest, "windows-x64").unwrap();
+        assert_eq!(windows.file, "WorkBuddyBar-v1.1.0-windows-x64-setup.exe");
+        assert!(is_valid_sha256(&windows.sha256));
+        let macos = update_asset_v2_for_platform(&manifest, "macos-aarch64").unwrap();
+        assert_eq!(macos.file, "WorkBuddyBar-v1.1.0-macos-aarch64.app.zip");
+        assert!(is_valid_sha256(&macos.sha256));
+
+        if let Some(info) = update_info_from_v2(&manifest, "1.0.11") {
+            assert!(info.self_update);
+            assert!(is_valid_sha256(info.sha256.as_deref().unwrap()));
+            assert_eq!(
+                info.manual_file_name.as_deref(),
+                Some(if cfg!(target_os = "windows") {
+                    "WorkBuddyBar-v1.1.0-windows-x64-setup.exe"
+                } else {
+                    "WorkBuddyBar-v1.1.0-macos-aarch64.dmg"
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn derives_macos_app_bundle_from_executable() {
+        let bundle = app_bundle_from_executable(Path::new(
+            "/Applications/WorkBuddyBar.app/Contents/MacOS/workbuddy-bar",
+        ));
+        assert_eq!(
+            bundle,
+            Some(PathBuf::from("/Applications/WorkBuddyBar.app"))
+        );
+        assert_eq!(app_bundle_from_executable(Path::new("/usr/bin/tool")), None);
+    }
+
+    #[test]
+    fn formats_sha256_as_lowercase_hex() {
+        let digest = Sha256::digest(b"abc");
+        assert_eq!(
+            hex_encode(&digest),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

@@ -271,31 +271,63 @@ jobs:
           test -f "release-assets/${asset_app}"
 
           VERSION="$version" TAG_NAME="$TAG_NAME" NOTES="$notes" \
-            ASSET_WIN="$asset_win" ASSET_MAC="$asset_mac" \
+            ASSET_WIN="$asset_win" ASSET_MAC="$asset_mac" ASSET_APP="$asset_app" \
             python3 - <<'PY'
+          import hashlib
           import json
           import os
 
-          manifest = {
+          def digest(path):
+              value = hashlib.sha256()
+              with open(path, "rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      value.update(chunk)
+              return value.hexdigest()
+
+          assets_dir = "release-assets"
+          win = os.environ["ASSET_WIN"]
+          mac = os.environ["ASSET_MAC"]
+          app = os.environ["ASSET_APP"]
+          legacy = {
               "version": os.environ["VERSION"],
               "tag": os.environ["TAG_NAME"],
               "notes": os.environ["NOTES"],
               "assets": {
-                  "windows-x64": os.environ["ASSET_WIN"],
-                  "macos-aarch64": os.environ["ASSET_MAC"],
+                  "windows-x64": win,
+                  "macos-aarch64": mac,
               },
           }
-          path = "release-assets/latest.json"
-          with open(path, "w", encoding="utf-8") as handle:
-              json.dump(manifest, handle, ensure_ascii=False, indent=2)
-              handle.write("\n")
-
-          with open(path, encoding="utf-8") as handle:
-              written = json.load(handle)
-          assert written["version"] == os.environ["VERSION"]
-          assert written["tag"] == os.environ["TAG_NAME"]
-          for name in written["assets"].values():
-              assert os.path.isfile(os.path.join("release-assets", name))
+          v2 = {
+              "version": os.environ["VERSION"],
+              "tag": os.environ["TAG_NAME"],
+              "notes": os.environ["NOTES"],
+              "assets": {
+                  "windows-x64": {
+                      "file": win,
+                      "sha256": digest(os.path.join(assets_dir, win)),
+                  },
+                  "macos-aarch64": {
+                      "file": app,
+                      "sha256": digest(os.path.join(assets_dir, app)),
+                  },
+              },
+              "manual": {
+                  "windows-x64": win,
+                  "macos-aarch64": mac,
+              },
+          }
+          for name, manifest in (("latest.json", legacy), ("latest-v2.json", v2)):
+              path = os.path.join(assets_dir, name)
+              with open(path, "w", encoding="utf-8") as handle:
+                  json.dump(manifest, handle, ensure_ascii=False, indent=2)
+                  handle.write("\n")
+              with open(path, encoding="utf-8") as handle:
+                  written = json.load(handle)
+              assert written["version"] == os.environ["VERSION"]
+              assert written["tag"] == os.environ["TAG_NAME"]
+              for asset in written["assets"].values():
+                  file_name = asset if isinstance(asset, str) else asset["file"]
+                  assert os.path.isfile(os.path.join(assets_dir, file_name))
           PY
 
           {
