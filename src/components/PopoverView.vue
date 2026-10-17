@@ -127,14 +127,6 @@ function creditExpiryUrgent(account: AccountView): boolean {
   return remaining > 0 && remaining <= reminderDays * 24 * 60 * 60;
 }
 
-function creditExpiryTitle(account: AccountView): string {
-  const expiries = account.creditExpiries ?? [];
-  const lines = expiries.map(
-    (expiry) => `${formatCredits(expiry.amount)} · ${formatReset(expiry.at)}`,
-  );
-  return lines.length ? lines.join("\n") : "暂无积分到期明细";
-}
-
 function scheduleResize() {
   window.clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => {
@@ -297,7 +289,6 @@ onUnmounted(() => {
                 <i
                   v-if="creditExpiryLabel(account) != null"
                   :class="['expiring-badge', { urgent: creditExpiryUrgent(account) }]"
-                  :title="creditExpiryTitle(account)"
                 >
                   {{ formatCredits(nextCreditExpiry(account)?.amount) }} · {{ creditExpiryLabel(account) }}
                 </i>
