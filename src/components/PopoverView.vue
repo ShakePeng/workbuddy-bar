@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AccountView, AppSnapshot } from "../types";
 import { useToast } from "../composables/useToast";
@@ -24,6 +25,7 @@ let unlisten: UnlistenFn | undefined;
 let resizeTimer = 0;
 let resizeObserver: ResizeObserver | undefined;
 let lastReportedHeight = 0;
+const currentVersion = ref("");
 const EXPIRY_REMINDER_DAYS = 2;
 
 const {
@@ -189,6 +191,7 @@ async function logout() {
 }
 
 onMounted(async () => {
+  currentVersion.value = await getVersion().catch(() => "");
   await load();
   if (content.value) {
     resizeObserver = new ResizeObserver(scheduleResize);
@@ -219,6 +222,7 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="header-actions">
+        <span v-if="currentVersion" class="app-version">v{{ currentVersion }}</span>
         <span v-if="snapshot?.username" class="current-user" :title="snapshot.username">{{ snapshot.username }}</span>
         <button class="icon-button" type="button" :disabled="refreshing" title="刷新" @click="refresh">
           <svg viewBox="0 0 24 24" :class="{ spinning: refreshing }"><path d="M20 11a8.1 8.1 0 0 0-14.9-3M4 5v4h4M4 13a8.1 8.1 0 0 0 14.9 3M20 19v-4h-4" /></svg>
