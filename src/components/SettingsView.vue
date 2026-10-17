@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import type { AppSnapshot, AuthMode, SettingsInput, SettingsView } from "../types";
+import { useToast } from "../composables/useToast";
+import { useUpdater } from "../composables/useUpdater";
 
 const loading = ref(true);
 const saving = ref(false);
@@ -17,9 +20,36 @@ const form = ref<SettingsInput>({
   refreshIntervalSec: 120,
   lowCreditThreshold: 1000,
   launchAtLogin: false,
+  expiryReminderDays: 2,
 });
 const showToken = ref(false);
 const showPassword = ref(false);
+const currentVersion = ref("");
+
+const {
+  status: updateStatus,
+  version: updateVersion,
+  notes: updateNotes,
+  progressPercent: updateProgressPercent,
+  progressLabel: updateProgressLabel,
+  error: updateError,
+  checkForUpdates,
+  installUpdate,
+} = useUpdater();
+const { message: toastMessage, kind: toastKind, show: showToast } = useToast();
+
+watch(error, (text) => {
+  if (text) showToast(text);
+});
+watch(saved, (value) => {
+  if (value) showToast("设置已保存并刷新数据", "success");
+});
+watch(updateError, (text) => {
+  if (text) showToast(text);
+});
+watch(updateStatus, (status) => {
+  if (status == "up-to-date") showToast("已是最新版本", "success");
+});
 
 const isHttp = computed(() => form.value.baseUrl.trim().toLowerCase().startsWith("http://"));
 const isPasswordMode = computed(() => authMode.value === "password");
@@ -38,6 +68,7 @@ async function load() {
       refreshIntervalSec: value.refreshIntervalSec,
       lowCreditThreshold: value.lowCreditThreshold,
       launchAtLogin: value.launchAtLogin,
+    expiryReminderDays: value.expiryReminderDays,
     };
   } catch (reason) {
     error.value = String(reason);
@@ -76,7 +107,10 @@ async function openManager() {
   }
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  currentVersion.value = await getVersion().catch(() => "未知");
+});
 </script>
 
 <template>
@@ -90,6 +124,7 @@ onMounted(load);
     </header>
 
     <form v-if="!loading" class="settings-form" @submit.prevent="save">
+    <div class="settings-grid">
       <section class="settings-section">
         <h2>连接</h2>
         <div class="mode-row">
@@ -159,6 +194,11 @@ onMounted(load);
           <span>低积分界面阈值</span>
           <input v-model.number="form.lowCreditThreshold" type="number" min="0" step="100" required />
         </label>
+        <label>
+          <span>快过期提醒（天）</span>
+          <input v-model.number="form.expiryReminderDays" type="number" min="0" max="365" step="1" required />
+          <small>到期前 N 天在账号明细中显示提醒，0 表示关闭</small>
+        </label>
         <label class="switch-row">
           <span>
             <b>登录系统后自动启动</b>
@@ -168,14 +208,44 @@ onMounted(load);
         </label>
       </section>
 
+      <section class="settings-section">
+        <h2>软件更新</h2>
+        <div class="update-row">
+          <span>当前版本</span>
+          <b>v{{ currentVersion }}</b>
+        </div>
+        <div class="update-actions">
+          <button
+            type="button"
+            class="secondary-button"
+            :disabled="updateStatus == 'checking' || updateStatus == 'downloading'"
+            @click="checkForUpdates"
+          >
+            {{ updateStatus == "checking" ? "检查中…" : "检查更新" }}
+          </button>
+          <button
+            v-if="updateStatus == 'available' || updateStatus == 'downloading'"
+            type="button"
+            class="primary-button"
+            :disabled="updateStatus == 'downloading'"
+            @click="installUpdate"
+          >
+            {{ updateStatus == "downloading" ? "下载中 " + updateProgressPercent + "%" : "立即更新 v" + updateVersion }}
+          </button>
+        </div>
+        <div v-if="updateStatus == 'downloading'" class="progress-track">
+          <i :style="{ width: `${updateProgressPercent}%` }"></i>
+        </div>
+        <p v-if="updateStatus == 'downloading'" class="update-hint">{{ updateProgressLabel }}</p>
+        <p v-if="updateStatus == 'available' && updateNotes" class="update-notes">{{ updateNotes }}</p>
+      </section>
+
       <section class="settings-section compact">
         <h2>本地配置</h2>
         <code>{{ settings?.configPath }}</code>
         <small>配置文件权限限制为 0600，令牌与账号密码不会写入日志。</small>
       </section>
-
-      <p v-if="error" class="form-error">{{ error }}</p>
-      <div v-if="saved" class="save-success">设置已保存并刷新数据</div>
+    </div>
 
       <footer class="settings-actions">
         <button type="button" class="secondary-button" @click="openManager">打开管理端</button>
@@ -185,5 +255,7 @@ onMounted(load);
         </button>
       </footer>
     </form>
+
+    <div v-if="toastMessage" :class="['toast-message', toastKind]">{{ toastMessage }}</div>
   </main>
 </template>

@@ -1,7 +1,7 @@
 import type { AccountStatus } from "../types";
 
 const numberFormatter = new Intl.NumberFormat("zh-CN", {
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 1,
 });
 
 const integerFormatter = new Intl.NumberFormat("zh-CN", {
@@ -20,7 +20,7 @@ export function formatInteger(value: number | null | undefined): string {
 
 export function formatTokens(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
+  if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
   if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
   return integerFormatter.format(value);
 }

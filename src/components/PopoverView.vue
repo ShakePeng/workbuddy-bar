@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppSnapshot } from "../types";
+import { useToast } from "../composables/useToast";
+import { useUpdater } from "../composables/useUpdater";
 import {
   accountStatusLabel,
   accountStatusTone,
@@ -21,10 +23,48 @@ const content = ref<HTMLElement | null>(null);
 let unlisten: UnlistenFn | undefined;
 let resizeTimer = 0;
 
+const {
+  status: updateStatus,
+  version: updateVersion,
+  notes: updateNotes,
+  progressPercent: updateProgressPercent,
+  progressLabel: updateProgressLabel,
+  error: updateError,
+  checkForUpdates,
+  installUpdate,
+} = useUpdater();
+const updateBusy = computed(
+  () => updateStatus.value == "checking" || updateStatus.value == "downloading",
+);
+const { message: toastMessage, kind: toastKind, show: showToast } = useToast();
+const persistentError = computed(() => actionError.value || snapshot.value?.error || "");
+watch(
+  [persistentError, updateError],
+  ([error, updateErr], [prevError, prevUpdateErr]) => {
+    if (error && error != prevError) showToast(error);
+    if (updateErr && updateErr != prevUpdateErr) showToast(updateErr);
+  },
+  { immediate: true },
+);
+watch(updateStatus, (status) => {
+  if (status == "up-to-date") showToast("已是最新版本", "success");
+});
+
 const healthyCount = computed(
   () => snapshot.value?.accounts.filter((account) => account.status === "healthy").length ?? 0,
 );
 const totalLabel = computed(() => formatCredits(snapshot.value?.totalCredits));
+const allTotalLabel = computed(() => {
+  let found = false;
+  let total = 0;
+  for (const account of snapshot.value?.accounts ?? []) {
+    if (account.credits != null && Number.isFinite(account.credits)) {
+      found = true;
+      total += Math.max(account.credits, 0);
+    }
+  }
+  return formatCredits(found ? Math.round(total * 100) / 100 : null);
+});
 const statusTone = computed(() => {
   const value = snapshot.value;
   if (!value || value.error) return "bad";
@@ -59,6 +99,14 @@ const keyUsageTotal = computed(() =>
     { todayTokens: 0, totalTokens: 0 },
   ),
 );
+function accountExpiringDays(expiresAt: number | null, isExpired: boolean): number | null {
+  if (!expiresAt || isExpired) return null;
+  const reminderDays = snapshot.value?.expiryReminderDays ?? 2;
+  if (reminderDays <= 0) return null;
+  const remaining = expiresAt - Math.floor(Date.now() / 1000);
+  if (remaining <= 0 || remaining > reminderDays * 24 * 60 * 60) return null;
+  return Math.max(1, Math.ceil(remaining / (24 * 60 * 60)));
+}
 
 async function resizeToContent() {
   await nextTick();
@@ -116,7 +164,11 @@ onMounted(async () => {
   });
 });
 
-watch([snapshot, actionError, refreshing], resizeToContent, { deep: true });
+watch(
+  [snapshot, refreshing, updateStatus, updateProgressPercent],
+  resizeToContent,
+  { deep: true },
+);
 
 onUnmounted(() => {
   window.clearTimeout(resizeTimer);
@@ -143,115 +195,152 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <section class="hero-card" :class="statusTone">
-      <div class="hero-top">
-        <span>全池可用积分</span>
-        <span class="freshness">{{ lastUpdated }}</span>
-      </div>
-      <div class="credit-number">{{ totalLabel }}</div>
-      <div class="hero-meta">
-        <span>{{ healthyCount }}/{{ snapshot?.accountTotal ?? 0 }} 个账号可用</span>
-        <span v-if="snapshot?.creditPartial">部分余额未同步</span>
-        <span v-else>已同步 {{ snapshot?.creditSyncedAccounts ?? 0 }} 个账户</span>
-      </div>
-    </section>
-
-    <section class="section-card usage-card">
-      <div class="section-title">
-        <h2>今日用量</h2>
-      </div>
-      <div class="metric-grid">
-        <div>
-          <span>请求</span>
-          <b>{{ formatInteger(snapshot?.today.todayRequests) }}</b>
+    <div class="popover-grid">
+      <section class="hero-card" :class="statusTone">
+        <div class="hero-top">
+          <span>积分概览</span>
+          <span class="freshness">{{ lastUpdated }}</span>
         </div>
-        <div>
-          <span>Tokens</span>
-          <b>{{ formatTokens(snapshot?.today.todayTokens) }}</b>
-        </div>
-        <div>
-          <span>实际扣费</span>
-          <b>{{ formatCredits(snapshot?.today.todayCredit) }}</b>
-        </div>
-      </div>
-      <div class="week-line">
-        <span>近 7 天</span>
-        <b>{{ formatCredits(snapshot?.today.weekCredit) }} 积分</b>
-        <span>{{ formatTokens(snapshot?.today.weekTokens) }} Tokens</span>
-      </div>
-      <div class="week-line month-line">
-        <span>近 30 天</span>
-        <b>{{ formatCredits(monthUsage.credit) }} 积分</b>
-        <span>{{ formatTokens(monthUsage.tokens) }} Tokens</span>
-      </div>
-    </section>
-
-    <section v-if="snapshot" class="section-card keys-card">
-      <div class="section-title">
-        <h2>密钥用量</h2>
-        <span>{{ snapshot?.keyUsage.length ?? 0 }} 个</span>
-      </div>
-      <template v-if="snapshot?.keyUsage.length">
-        <div class="key-usage-head">
-          <span>密钥</span>
-          <span>今日</span>
-          <span>累计</span>
-        </div>
-        <div v-if="(snapshot?.keyUsage.length ?? 0) > 1" class="key-usage-total">
-          <span>全部密钥</span>
-          <b>{{ formatTokens(keyUsageTotal.todayTokens) }}</b>
-          <b>{{ formatTokens(keyUsageTotal.totalTokens) }}</b>
-        </div>
-        <div class="key-usage-list">
-          <div
-            v-for="key in snapshot.keyUsage"
-            :key="key.id"
-            :class="['key-usage-row', { disabled: !key.enabled }]"
-          >
-            <div class="key-usage-main">
-              <span>{{ key.name }}</span>
-            </div>
-            <b>{{ formatTokens(key.todayTokens) }}</b>
-            <b>{{ formatTokens(key.totalTokens) }}</b>
+        <div class="hero-grid">
+          <div class="hero-metric">
+            <span>全池可用积分</span>
+            <div class="credit-number">{{ totalLabel }}</div>
+          </div>
+          <div class="hero-metric">
+            <span>总积分（含停用）</span>
+            <div class="credit-number total">{{ allTotalLabel }}</div>
           </div>
         </div>
-      </template>
-      <div v-else class="empty-state">暂无密钥用量</div>
-    </section>
+        <div class="hero-meta">
+          <span>{{ healthyCount }}/{{ snapshot?.accountTotal ?? 0 }} 个账号可用</span>
+          <span v-if="snapshot?.creditPartial">部分余额未同步</span>
+          <span v-else>已同步 {{ snapshot?.creditSyncedAccounts ?? 0 }} 个账户</span>
+        </div>
+      </section>
 
-    <section class="section-card accounts-card">
-      <div class="section-title">
-        <h2>账号明细</h2>
-        <span>{{ snapshot?.accounts.length ?? 0 }} 个</span>
-      </div>
-      <div v-if="snapshot?.accounts.length" class="account-list">
+      <section class="section-card usage-card">
+        <div class="section-title">
+          <h2>今日用量</h2>
+        </div>
+        <div class="metric-grid">
+          <div>
+            <span>请求</span>
+            <b>{{ formatInteger(snapshot?.today.todayRequests) }}</b>
+          </div>
+          <div>
+            <span>Tokens</span>
+            <b>{{ formatTokens(snapshot?.today.todayTokens) }}</b>
+          </div>
+          <div>
+            <span>实际扣费</span>
+            <b>{{ formatCredits(snapshot?.today.todayCredit) }}</b>
+          </div>
+        </div>
+        <div class="week-line">
+          <span>近 7 天</span>
+          <b>{{ formatCredits(snapshot?.today.weekCredit) }} 积分</b>
+          <span>{{ formatTokens(snapshot?.today.weekTokens) }} Tokens</span>
+        </div>
+        <div class="week-line month-line">
+          <span>近 30 天</span>
+          <b>{{ formatCredits(monthUsage.credit) }} 积分</b>
+          <span>{{ formatTokens(monthUsage.tokens) }} Tokens</span>
+        </div>
+      </section>
+
+      <section class="section-card accounts-card">
+        <div class="section-title">
+          <h2>账号明细</h2>
+          <span>{{ snapshot?.accounts.length ?? 0 }} 个</span>
+        </div>
+        <div v-if="snapshot?.accounts.length" class="account-list">
         <div v-for="account in snapshot.accounts" :key="account.uid || account.file" class="account-row">
-          <div class="account-main">
-            <div class="account-name">
-              <span>{{ account.nickname }}</span>
-              <i :class="account.realm === 'global' ? 'realm global' : 'realm'">{{ realmLabel(account.realm) }}</i>
-            </div>
+            <div class="account-main">
+              <div class="account-name">
+                <span>{{ account.nickname }}</span>
+                <i :class="account.realm === 'global' ? 'realm global' : 'realm'">{{ realmLabel(account.realm) }}</i>
+                <i v-if="accountExpiringDays(account.expiresAt, account.isExpired) != null" class="expiring-badge">
+                {{ accountExpiringDays(account.expiresAt, account.isExpired) }}天内到期积分{{ formatCredits(account.credits) }}
+                </i>
+              </div>
             <small>
-              {{ accountStatusLabel(account.status) }}
-              <template v-if="account.expiresAt"> · 到期 {{ formatReset(account.expiresAt) }}</template>
-            </small>
-          </div>
-          <div class="account-credit">
-            <b>{{ formatCredits(account.credits) }}</b>
-            <i :class="['account-tone', accountStatusTone(account.status)]"></i>
+                {{ accountStatusLabel(account.status) }}
+                <template v-if="account.expiresAt"> · 到期 {{ formatReset(account.expiresAt) }}</template>
+              </small>
+            </div>
+            <div class="account-credit">
+              <b>{{ formatCredits(account.credits) }}</b>
+              <i :class="['account-tone', accountStatusTone(account.status)]"></i>
+            </div>
           </div>
         </div>
-      </div>
-      <div v-else class="empty-state">暂未读取到账号数据</div>
-    </section>
+        <div v-else class="empty-state">暂未读取到账号数据</div>
+      </section>
 
-    <p v-if="snapshot?.error" class="inline-error">{{ snapshot.error }}</p>
-    <p v-if="actionError" class="inline-error">{{ actionError }}</p>
+      <section v-if="snapshot" class="section-card keys-card">
+        <div class="section-title">
+          <h2>密钥用量</h2>
+          <span>{{ snapshot?.keyUsage.length ?? 0 }} 个</span>
+        </div>
+        <template v-if="snapshot?.keyUsage.length">
+          <div class="key-usage-head">
+            <span>密钥</span>
+            <span>今日</span>
+            <span>累计</span>
+          </div>
+          <div v-if="(snapshot?.keyUsage.length ?? 0) > 1" class="key-usage-total">
+            <span>全部密钥</span>
+            <b>{{ formatTokens(keyUsageTotal.todayTokens) }}</b>
+            <b>{{ formatTokens(keyUsageTotal.totalTokens) }}</b>
+          </div>
+          <div class="key-usage-list">
+            <div
+              v-for="key in snapshot.keyUsage"
+              :key="key.id"
+              :class="['key-usage-row', { disabled: !key.enabled }]"
+            >
+              <div class="key-usage-main">
+                <span>{{ key.name }}</span>
+              </div>
+              <b>{{ formatTokens(key.todayTokens) }}</b>
+              <b>{{ formatTokens(key.totalTokens) }}</b>
+            </div>
+          </div>
+        </template>
+        <div v-else class="empty-state">暂无密钥用量</div>
+      </section>
+    </div>
+
+    <section
+      v-if="updateStatus == 'available' || updateStatus == 'downloading'"
+      class="section-card update-card"
+    >
+      <template v-if="updateStatus == 'available'">
+        <div class="update-head">
+          <span>发现新版本</span>
+          <b>v{{ updateVersion }}</b>
+        </div>
+        <p v-if="updateNotes" class="update-notes">{{ updateNotes }}</p>
+        <button class="primary-button update-button" type="button" @click="installUpdate">立即更新</button>
+      </template>
+      <div v-else-if="updateStatus == 'downloading'" class="update-progress">
+        <div class="update-head">
+          <span>正在下载更新</span>
+          <b>{{ updateProgressPercent }}%</b>
+        </div>
+        <div class="progress-track"><i :style="{ width: `${updateProgressPercent}%` }"></i></div>
+        <small>{{ updateProgressLabel }}</small>
+      </div>
+    </section>
 
     <footer class="popover-footer">
       <button type="button" @click="openManager">
         <svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" /></svg>
         管理端
+      </button>
+      <button type="button" :disabled="updateBusy" @click="checkForUpdates">
+        <svg viewBox="0 0 24 24"><path d="M12 3v11m0 0-4-4m4 4 4-4M4 21h16" /></svg>
+        检查更新
       </button>
       <button type="button" @click="openSettings">
         <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.42 1.42-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20h-2v-.08A1.7 1.7 0 0 0 12 18.36a1.7 1.7 0 0 0-1.88.34l-.06.06-1.42-1.42.06-.06A1.7 1.7 0 0 0 9.04 15a1.7 1.7 0 0 0-1.56-1.04H7v-2h.48A1.7 1.7 0 0 0 9.04 10a1.7 1.7 0 0 0-.34-1.88l-.06-.06 1.42-1.42.06.06A1.7 1.7 0 0 0 12 7.04 1.7 1.7 0 0 0 13.04 5.48V5h2v.48A1.7 1.7 0 0 0 16.6 7a1.7 1.7 0 0 0 1.88-.34l.06-.06 1.42 1.42-.06.06A1.7 1.7 0 0 0 19.56 10a1.7 1.7 0 0 0 1.56 1.04H21v2h-.48A1.7 1.7 0 0 0 19.4 15Z" /></svg>
@@ -262,6 +351,8 @@ onUnmounted(() => {
         退出登录
       </button>
     </footer>
+
+    <div v-if="toastMessage" :class="['toast-message', toastKind]">{{ toastMessage }}</div>
     </div>
   </main>
 </template>

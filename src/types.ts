@@ -65,6 +65,7 @@ export interface AppSnapshot {
   creditPartial: boolean;
   totalCredits: number | null;
   accounts: AccountView[];
+  expiryReminderDays: number;
   today: UsageSummary;
   usageDays: UsagePoint[];
   isAdmin: boolean;
@@ -81,6 +82,7 @@ export interface SettingsView {
   refreshIntervalSec: number;
   lowCreditThreshold: number;
   launchAtLogin: boolean;
+  expiryReminderDays: number;
   configPath: string;
 }
 

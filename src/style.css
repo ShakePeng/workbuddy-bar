@@ -316,6 +316,17 @@ button:disabled {
   flex-direction: column;
 }
 
+.popover-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 9px;
+}
+
+.popover-grid .section-card {
+  margin-top: 0;
+}
+
 .popover-page::-webkit-scrollbar,
 .account-list::-webkit-scrollbar {
   display: none;
@@ -484,11 +495,27 @@ button:disabled {
 .credit-number {
   margin: 4px 0 2px;
   color: #161618;
-  font-size: 38px;
+  font-size: 30px;
   font-weight: 760;
   line-height: 1.12;
   letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.hero-metric > span {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.credit-number.total {
+  color: #5b5b62;
 }
 
 .hero-meta {
@@ -699,6 +726,16 @@ button:disabled {
   background: rgba(92, 106, 196, 0.12);
 }
 
+.expiring-badge {
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: #b45309;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .account-main small {
   display: block;
   margin-top: 2px;
@@ -729,9 +766,115 @@ button:disabled {
   background: var(--red);
 }
 
+.update-card {
+  gap: 8px;
+}
+
+.update-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.update-head b {
+  color: #161618;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-notes {
+  max-height: 110px;
+  margin: 0;
+  overflow-y: auto;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.update-button {
+  height: 30px;
+  font-size: 10.5px;
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.update-progress small {
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.progress-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(120, 120, 128, 0.15);
+}
+
+.progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 120ms ease;
+}
+
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.update-row span {
+  color: var(--muted);
+}
+
+.update-row b {
+  font-size: 11.5px;
+}
+
+.update-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.update-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.toast-message {
+  position: fixed;
+  bottom: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 48px);
+  padding: 9px 14px;
+  border: 1px solid rgba(223, 75, 75, 0.38);
+  border-radius: 10px;
+  color: var(--red);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+  font-size: 10.5px;
+  z-index: 40;
+}
+
+.toast-message.success {
+  border-color: rgba(47, 158, 95, 0.38);
+  color: #247a49;
+}
+
 .popover-footer {
   display: grid;
-  grid-template-columns: 1.15fr 0.85fr 1.15fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 5px;
   margin-top: 11px;
 }
@@ -782,6 +925,12 @@ button:disabled {
 }
 
 .settings-form {
+  gap: 12px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
@@ -843,14 +992,6 @@ button:disabled {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.save-success {
-  padding: 8px 10px;
-  border-radius: 9px;
-  color: #247a49;
-  background: rgba(47, 158, 95, 0.11);
-  font-size: 11px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -918,8 +1059,22 @@ button:disabled {
   }
 
   .credit-number,
-  .week-line b {
+  .week-line b,
+  .update-head b,
+  .update-row b {
     color: #f7f7f8;
+  }
+
+  .credit-number.total {
+    color: #c7c7cc;
+  }
+
+  .progress-track {
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .expiring-badge {
+    color: #fbbf24;
   }
 
   .metric-grid > div {
@@ -932,6 +1087,14 @@ button:disabled {
 
   .popover-footer button:hover {
     background: rgba(255, 255, 255, 0.14);
+  }
+
+  .toast-message {
+    background: rgba(56, 56, 59, 0.96);
+  }
+
+  .toast-message.success {
+    color: #4ade80;
   }
 
   .settings-section.compact code {

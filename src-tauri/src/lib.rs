@@ -53,6 +53,9 @@ struct AppConfig {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    // 账号到期前 N 天在弹层账号明细中显示提醒，0 视为关闭。
+    #[serde(default = "default_expiry_reminder_days")]
+    expiry_reminder_days: u64,
 }
 
 impl Default for AppConfig {
@@ -68,8 +71,13 @@ impl Default for AppConfig {
             refresh_interval_sec: 120,
             low_credit_threshold: 1000.0,
             launch_at_login: false,
+            expiry_reminder_days: default_expiry_reminder_days(),
         }
     }
+}
+
+fn default_expiry_reminder_days() -> u64 {
+    2
 }
 
 impl AppConfig {
@@ -172,6 +180,7 @@ struct AppSnapshot {
     credit_partial: bool,
     total_credits: Option<f64>,
     accounts: Vec<AccountView>,
+    expiry_reminder_days: u64,
     today: UsageSummary,
     usage_days: Vec<UsagePoint>,
     is_admin: bool,
@@ -195,6 +204,7 @@ impl Default for AppSnapshot {
             credit_partial: false,
             total_credits: None,
             accounts: Vec::new(),
+            expiry_reminder_days: default_expiry_reminder_days(),
             today: UsageSummary::default(),
             usage_days: Vec::new(),
             is_admin: false,
@@ -215,6 +225,7 @@ struct SettingsView {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    expiry_reminder_days: u64,
     config_path: String,
 }
 
@@ -228,6 +239,7 @@ struct SettingsInput {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    expiry_reminder_days: u64,
 }
 
 #[derive(Debug)]
@@ -878,6 +890,7 @@ async fn fetch_snapshot(
         credit_partial,
         total_credits,
         accounts: parsed_accounts,
+        expiry_reminder_days: config.expiry_reminder_days,
         today: parse_usage_summary(&summary.value),
         usage_days: parse_usage_days(&daily.value),
         is_admin,
@@ -1465,6 +1478,7 @@ fn get_settings(app: AppHandle, state: State<'_, AppState>) -> Result<SettingsVi
         refresh_interval_sec: config.refresh_interval_sec,
         low_credit_threshold: config.low_credit_threshold,
         launch_at_login: config.launch_at_login,
+        expiry_reminder_days: config.expiry_reminder_days,
         config_path: config_path(&app)
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default(),
@@ -1505,6 +1519,7 @@ async fn save_settings(
     config.refresh_interval_sec = interval;
     config.low_credit_threshold = threshold;
     config.launch_at_login = settings.launch_at_login;
+    config.expiry_reminder_days = settings.expiry_reminder_days.clamp(0, 365);
     save_config(&app, &config)?;
     state.set_config(config.clone());
     apply_autostart(&app, config.launch_at_login)?;
@@ -1624,6 +1639,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .setup(|app| {
             let state = app.state::<AppState>();
@@ -1831,6 +1848,21 @@ mod tests {
         assert_eq!(config.auth_mode, AUTH_MODE_TOKEN);
         assert_eq!(config.token, "wbt_abc");
         assert_eq!(config.base_url, "http://47.99.55.3:7864");
+    }
+
+    #[test]
+    fn defaults_expiry_reminder_days_for_old_config() {
+        // 1.0.5 及更早的配置没有 expiryReminderDays：解析后回落到默认 2 天。
+        let legacy = r#"{
+            "configVersion": 4,
+            "baseUrl": "http://47.99.55.3:7864",
+            "token": "wbt_abc",
+            "refreshIntervalSec": 120,
+            "lowCreditThreshold": 1000.0,
+            "launchAtLogin": false
+        }"#;
+        let config: AppConfig = serde_json::from_str(legacy).unwrap();
+        assert_eq!(config.expiry_reminder_days, 2);
     }
 
     #[test]
