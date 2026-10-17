@@ -47,7 +47,7 @@ export function useUpdater() {
   const progressLabel = computed(() => {
     if (total.value > 0) return `${formatBytes(downloaded.value)} / ${formatBytes(total.value)}`;
     if (downloaded.value > 0) return `已下载 ${formatBytes(downloaded.value)}`;
-    return "准备中…";
+    return "连接中…";
   });
 
   async function checkForUpdates() {

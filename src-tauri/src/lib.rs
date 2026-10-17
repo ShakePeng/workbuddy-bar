@@ -1134,6 +1134,48 @@ fn update_tray(app: &AppHandle, snapshot: &AppSnapshot) {
     let _ = tray.set_icon(Some(tray_image(kind)));
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PopoverPoint {
+    x: f64,
+    y: f64,
+}
+
+fn clamp_popover_position(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+) -> PopoverPoint {
+    PopoverPoint {
+        x: x.clamp(left + 8.0, (right - width - 8.0).max(left + 8.0)),
+        y: y.clamp(top + 8.0, (bottom - height - 8.0).max(top + 8.0)),
+    }
+}
+
+fn place_popover_from_anchor(
+    anchor_x: f64,
+    anchor_y: f64,
+    width: f64,
+    height: f64,
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+    above: bool,
+) -> PopoverPoint {
+    let x = anchor_x - width / 2.0;
+    let y = if above {
+        anchor_y - height - 10.0
+    } else {
+        anchor_y + 10.0
+    };
+    clamp_popover_position(x, y, width, height, left, top, right, bottom)
+}
+
 fn toggle_popover(app: &AppHandle) {
     let Some(window) = app.get_webview_window("popover") else {
         return;
@@ -1231,6 +1273,21 @@ fn position_popover_windows(app: &AppHandle, window: &tauri::WebviewWindow) {
         return;
     };
 
+    if let Some(position) = popover_position_windows(app, window, anchor_x, anchor_y, tray_rect) {
+        let _ = window.set_position(Position::Physical(position));
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+#[cfg(target_os = "windows")]
+fn popover_position_windows(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    anchor_x: f64,
+    anchor_y: f64,
+    tray_rect: Option<tauri::Rect>,
+) -> Option<tauri::PhysicalPosition<i32>> {
     let target_monitor = app
         .monitor_from_point(anchor_x, anchor_y)
         .ok()
@@ -1247,39 +1304,85 @@ fn position_popover_windows(app: &AppHandle, window: &tauri::WebviewWindow) {
         )
     });
 
-    let mut x = anchor_x - window_size.width as f64 / 2.0;
-    let mut y = anchor_y + 12.0;
-
-    if let Some(monitor) = target_monitor.as_ref() {
-        let area = monitor.work_area();
-        let left = area.position.x as f64;
-        let top = area.position.y as f64;
-        let right = left + area.size.width as f64;
-        let bottom = top + area.size.height as f64;
-        let window_width = window_size.width as f64;
-        let window_height = window_size.height as f64;
-        let anchor_on_lower_half = anchor_y >= top + area.size.height as f64 / 2.0;
-
-        x = x.clamp(left + 8.0, (right - window_width - 8.0).max(left + 8.0));
-        y = if anchor_on_lower_half {
-            tray_rect
-                .map(|rect| tray_rect_physical(rect).1 - window_height - 10.0)
-                .unwrap_or(anchor_y - window_height - 12.0)
-        } else {
-            tray_rect
-                .map(|rect| {
-                    let (_, y, _, height) = tray_rect_physical(rect);
-                    y + height + 10.0
-                })
-                .unwrap_or(anchor_y + 12.0)
+    let Some(monitor) = target_monitor else {
+        return None;
+    };
+    let area = monitor.work_area();
+    let left = area.position.x as f64;
+    let top = area.position.y as f64;
+    let right = left + area.size.width as f64;
+    let bottom = top + area.size.height as f64;
+    let above = anchor_y >= top + area.size.height as f64 / 2.0;
+    let anchor_y = match (tray_rect, above) {
+        (Some(rect), true) => tray_rect_physical(rect).1,
+        (Some(rect), false) => {
+            let (_, y, _, height) = tray_rect_physical(rect);
+            y + height
         }
-        .clamp(top + 8.0, (bottom - window_height - 8.0).max(top + 8.0));
+        (None, _) => anchor_y,
+    };
+    let point = place_popover_from_anchor(
+        anchor_x,
+        anchor_y,
+        window_size.width as f64,
+        window_size.height as f64,
+        left,
+        top,
+        right,
+        bottom,
+        above,
+    );
+    Some(tauri::PhysicalPosition::new(
+        point.x.round() as i32,
+        point.y.round() as i32,
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn reposition_popover_windows(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    previous_position: tauri::PhysicalPosition<i32>,
+    previous_size: tauri::PhysicalSize<u32>,
+) {
+    let tray_rect = app
+        .tray_by_id(TRAY_ID)
+        .and_then(|tray| tray.rect().ok().flatten());
+    if let Some(rect) = tray_rect {
+        let (x, y, width, height) = tray_rect_physical(rect);
+        if let Some(position) =
+            popover_position_windows(app, window, x + width / 2.0, y + height / 2.0, Some(rect))
+        {
+            let _ = window.set_position(Position::Physical(position));
+        }
+        return;
     }
 
-    let position = tauri::PhysicalPosition::new(x.round() as i32, y.round() as i32);
-    let _ = window.set_position(Position::Physical(position));
-    let _ = window.show();
-    let _ = window.set_focus();
+    let Some(monitor) = app
+        .monitor_from_point(previous_position.x as f64, previous_position.y as f64)
+        .ok()
+        .flatten()
+        .or_else(|| window.current_monitor().ok().flatten())
+    else {
+        return;
+    };
+    let area = monitor.work_area();
+    let size = window.outer_size().unwrap_or(previous_size);
+    let x = previous_position.x as f64 + (previous_size.width as f64 - size.width as f64) / 2.0;
+    let point = clamp_popover_position(
+        x,
+        previous_position.y as f64,
+        size.width as f64,
+        size.height as f64,
+        area.position.x as f64,
+        area.position.y as f64,
+        area.position.x as f64 + area.size.width as f64,
+        area.position.y as f64 + area.size.height as f64,
+    );
+    let _ = window.set_position(Position::Physical(tauri::PhysicalPosition::new(
+        point.x.round() as i32,
+        point.y.round() as i32,
+    )));
 }
 
 fn show_popover_centered(app: &AppHandle) {
@@ -1565,6 +1668,22 @@ fn open_settings(app: AppHandle) -> Result<(), String> {
 
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/ShakePeng/workbuddy-bar/releases/latest";
+const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const UPDATE_READ_TIMEOUT: Duration = Duration::from_secs(60);
+const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(20);
+
+fn update_http_client(total_timeout: Option<Duration>) -> Result<Client, String> {
+    let mut builder = Client::builder()
+        .user_agent("WorkBuddyBar")
+        .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+        .read_timeout(UPDATE_READ_TIMEOUT);
+    if let Some(timeout) = total_timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder
+        .build()
+        .map_err(|error| format!("初始化 HTTP 客户端失败：{error}"))
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1618,10 +1737,7 @@ fn is_newer_version(remote: &str, current: &str) -> bool {
 
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
-    let client = Client::builder()
-        .user_agent("WorkBuddyBar")
-        .build()
-        .map_err(|error| format!("初始化 HTTP 客户端失败：{error}"))?;
+    let client = update_http_client(Some(UPDATE_CHECK_TIMEOUT))?;
     let release: Value = client
         .get(GITHUB_LATEST_RELEASE_API)
         .send()
@@ -1672,10 +1788,7 @@ async fn download_update(
     file_name: String,
     on_event: Channel<UpdateDownloadEvent>,
 ) -> Result<String, String> {
-    let client = Client::builder()
-        .user_agent("WorkBuddyBar")
-        .build()
-        .map_err(|error| format!("初始化 HTTP 客户端失败：{error}"))?;
+    let client = update_http_client(None)?;
     let mut response = client
         .get(&url)
         .send()
@@ -1700,28 +1813,52 @@ async fn download_update(
         .download_dir()
         .map_err(|error| format!("定位下载文件夹失败：{error}"))?;
     let target = download_dir.join(safe_name);
-    let mut file = tokio::fs::File::create(&target)
+    let partial = target.with_extension(format!(
+        "{}.part",
+        target
+            .extension()
+            .map(|value| value.to_string_lossy())
+            .unwrap_or_default()
+    ));
+    let mut file = tokio::fs::File::create(&partial)
         .await
         .map_err(|error| format!("创建安装包文件失败：{error}"))?;
 
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| format!("下载失败：{error}"))?
-    {
-        file.write_all(&chunk)
+    let download_result: Result<(), String> = async {
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| format!("下载失败：{error}"))?
+        {
+            file.write_all(&chunk)
+                .await
+                .map_err(|error| format!("写入安装包失败：{error}"))?;
+            on_event
+                .send(UpdateDownloadEvent::Progress {
+                    chunk_length: chunk.len() as u64,
+                })
+                .map_err(|error| format!("发送下载进度失败：{error}"))?;
+        }
+        file.flush()
             .await
             .map_err(|error| format!("写入安装包失败：{error}"))?;
-        on_event
-            .send(UpdateDownloadEvent::Progress {
-                chunk_length: chunk.len() as u64,
-            })
-            .map_err(|error| format!("发送下载进度失败：{error}"))?;
+        Ok(())
     }
-    file.flush()
-        .await
-        .map_err(|error| format!("写入安装包失败：{error}"))?;
+    .await;
+
+    if let Err(error) = download_result {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(error);
+    }
     drop(file);
+    if tokio::fs::try_exists(&target).await.unwrap_or(false) {
+        tokio::fs::remove_file(&target)
+            .await
+            .map_err(|error| format!("替换旧安装包失败：{error}"))?;
+    }
+    tokio::fs::rename(&partial, &target)
+        .await
+        .map_err(|error| format!("保存安装包失败：{error}"))?;
     on_event
         .send(UpdateDownloadEvent::Finished)
         .map_err(|error| format!("发送下载进度失败：{error}"))?;
@@ -1767,7 +1904,8 @@ fn resize_popover(app: AppHandle, height: f64) -> Result<(), String> {
         .unwrap_or(1000.0)
         .max(320.0);
     let target_height = height.clamp(320.0, max_height);
-    let position = window.outer_position().ok();
+    let previous_position = window.outer_position().ok();
+    let previous_size = size;
 
     window
         .set_size(tauri::Size::Logical(tauri::LogicalSize::new(
@@ -1776,8 +1914,38 @@ fn resize_popover(app: AppHandle, height: f64) -> Result<(), String> {
         )))
         .map_err(|error| error.to_string())?;
 
-    if let Some(position) = position {
-        let _ = window.set_position(Position::Physical(position));
+    if window.is_visible().unwrap_or(false) {
+        #[cfg(target_os = "windows")]
+        if let Some(position) = previous_position {
+            reposition_popover_windows(&app, &window, position, previous_size);
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        if let Some(position) = previous_position {
+            if let Some(monitor) = window
+                .current_monitor()
+                .ok()
+                .flatten()
+                .or_else(|| app.primary_monitor().ok().flatten())
+            {
+                let area = monitor.work_area();
+                let current_size = window.outer_size().unwrap_or(size);
+                let point = clamp_popover_position(
+                    position.x as f64,
+                    position.y as f64,
+                    current_size.width as f64,
+                    current_size.height as f64,
+                    area.position.x as f64,
+                    area.position.y as f64,
+                    area.position.x as f64 + area.size.width as f64,
+                    area.position.y as f64 + area.size.height as f64,
+                );
+                let _ = window.set_position(Position::Physical(tauri::PhysicalPosition::new(
+                    point.x.round() as i32,
+                    point.y.round() as i32,
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -1939,6 +2107,30 @@ mod tests {
         assert!(!is_newer_version("v1.0.7", "1.0.7"));
         assert!(!is_newer_version("1.0.6", "1.0.7"));
         assert!(!is_newer_version("v1.0", "1.0.7"));
+    }
+
+    #[test]
+    fn places_popover_below_and_above_anchor() {
+        let below =
+            place_popover_from_anchor(500.0, 100.0, 200.0, 300.0, 0.0, 0.0, 1000.0, 800.0, false);
+        assert_eq!(below, PopoverPoint { x: 400.0, y: 110.0 });
+
+        let above =
+            place_popover_from_anchor(500.0, 700.0, 200.0, 300.0, 0.0, 0.0, 1000.0, 800.0, true);
+        assert_eq!(above, PopoverPoint { x: 400.0, y: 390.0 });
+    }
+
+    #[test]
+    fn clamps_popover_to_narrow_work_area() {
+        let point =
+            place_popover_from_anchor(50.0, 100.0, 400.0, 300.0, 0.0, 0.0, 300.0, 800.0, false);
+        assert_eq!(point.x, 8.0);
+    }
+
+    #[test]
+    fn shifts_popover_up_when_content_grows_past_bottom() {
+        let point = clamp_popover_position(100.0, 700.0, 400.0, 300.0, 0.0, 0.0, 1000.0, 800.0);
+        assert_eq!(point.y, 492.0);
     }
 
     #[test]

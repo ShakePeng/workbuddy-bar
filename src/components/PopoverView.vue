@@ -22,6 +22,8 @@ const actionError = ref("");
 const content = ref<HTMLElement | null>(null);
 let unlisten: UnlistenFn | undefined;
 let resizeTimer = 0;
+let resizeObserver: ResizeObserver | undefined;
+let lastReportedHeight = 0;
 const EXPIRY_REMINDER_DAYS = 2;
 
 const {
@@ -133,16 +135,25 @@ function creditExpiryTitle(account: AccountView): string {
   return lines.length ? lines.join("\n") : "暂无积分到期明细";
 }
 
+function scheduleResize() {
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => {
+    void resizeToContent();
+  }, 40);
+}
+
 async function resizeToContent() {
   await nextTick();
-  window.clearTimeout(resizeTimer);
-  resizeTimer = window.setTimeout(async () => {
-    const element = content.value;
-    if (!element) return;
-
-    const height = Math.ceil(element.getBoundingClientRect().height + 28);
+  const element = content.value;
+  if (!element) return;
+  const height = Math.ceil(element.getBoundingClientRect().height + 28);
+  if (Math.abs(height - lastReportedHeight) < 1) return;
+  lastReportedHeight = height;
+  try {
     await invoke("resize_popover", { height });
-  }, 0);
+  } catch (reason) {
+    actionError.value = String(reason);
+  }
 }
 
 async function load() {
@@ -183,20 +194,19 @@ async function logout() {
 
 onMounted(async () => {
   await load();
+  if (content.value) {
+    resizeObserver = new ResizeObserver(scheduleResize);
+    resizeObserver.observe(content.value);
+  }
   await resizeToContent();
   unlisten = await listen<AppSnapshot>("snapshot-changed", (event) => {
     snapshot.value = event.payload;
   });
 });
 
-watch(
-  [snapshot, refreshing, updateStatus, updateProgressPercent],
-  resizeToContent,
-  { deep: true },
-);
-
 onUnmounted(() => {
   window.clearTimeout(resizeTimer);
+  resizeObserver?.disconnect();
   unlisten?.();
 });
 </script>
