@@ -76,24 +76,8 @@ git push origin v1.0.0
 
 推送 `v*` 标签后，GitHub Actions 会自动构建 macOS ARM64 DMG 和 Windows x64 NSIS 安装包，并创建 GitHub Release。
 
-## 自动更新
+## 检查更新
 
-应用内置检查更新：在弹层底部或「设置 → 软件更新」点击「检查更新」，确认后自动下载、安装并重启。
-更新源是 GitHub Release 上的 `latest.json` 与签名安装包，仓库需保持公开以便匿名下载。
-
-一次性配置（已完成的可跳过）：
-
-1. 生成更新签名密钥（私钥保留在本机，不要提交或外发）：
-
-   ```bash
-   yarn tauri signer generate -w ~/.tauri/workbuddy-updater.key --password "" --ci
-   ```
-
-2. 把公钥写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。
-3. 在仓库 `Settings → Secrets and variables → Actions` 添加 `TAURI_SIGNING_PRIVATE_KEY`，值为私钥文件内容。
-
-私钥未设密码时无需添加密码 Secret：workflow 会把 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 置为空，
-避免签名时出现交互式密码提示卡住构建。
-
-发布时 CI 会用私钥给更新包签名，并生成包含两平台签名的 `latest.json` 随 Release 上传。
-注意：1.0.5 及更早版本没有更新器，需要手动下载安装 1.0.7 一次，之后的版本才能在应用内自动更新。
+应用内置检查更新：在弹层底部或「设置 → 软件更新」点击「检查更新」，检测到新版本后可一键下载
+对应平台的最新安装包到系统下载文件夹，并自动打开所在位置，手动运行安装包即可完成更新。
+更新信息来自 GitHub Releases 公开接口，无需签名密钥与额外配置。

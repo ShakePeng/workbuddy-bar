@@ -59,17 +59,8 @@
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; script-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI1M0ZDMzk0QTc5RTQ4OEYKUldTUFNKNm5sTU0vdGUwcFJ0dlV1SU9sN2w1d0pVclI1cktpakhRUnEzODJ5NHNDQWV2SVM2K2EK",
-      "endpoints": [
-        "https://github.com/ShakePeng/workbuddy-bar/releases/latest/download/latest.json"
-      ]
-    }
-  },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
     "targets": "all",
     "category": "Utility",
     "icon": [

@@ -9,8 +9,11 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use tokio::io::AsyncWriteExt;
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::ipc::Channel;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 #[cfg(not(target_os = "windows"))]
 use tauri::LogicalPosition;
@@ -1541,6 +1544,194 @@ fn open_settings(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+const GITHUB_LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/ShakePeng/workbuddy-bar/releases/latest";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    version: String,
+    notes: String,
+    download_url: String,
+    file_name: String,
+}
+
+// 与官方更新器一致的事件结构，前端按 event 字段区分阶段。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "event")]
+enum UpdateDownloadEvent {
+    #[serde(rename = "Started")]
+    Started { content_length: Option<u64> },
+    #[serde(rename = "Progress")]
+    Progress { chunk_length: u64 },
+    #[serde(rename = "Finished")]
+    Finished,
+}
+
+// 按 v主.次.修订 逐段数值比较；解析失败的部分按 0 处理。
+fn is_newer_version(remote: &str, current: &str) -> bool {
+    let parse = |value: &str| -> Vec<u64> {
+        value
+            .trim()
+            .trim_start_matches(['v', 'V'])
+            .split('.')
+            .map(|part| {
+                part.split(['-', '+'])
+                    .next()
+                    .unwrap_or("0")
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap_or(0)
+            })
+            .collect()
+    };
+    let remote_parts = parse(remote);
+    let current_parts = parse(current);
+    for index in 0..remote_parts.len().max(current_parts.len()) {
+        let remote_part = remote_parts.get(index).copied().unwrap_or(0);
+        let current_part = current_parts.get(index).copied().unwrap_or(0);
+        if remote_part != current_part {
+            return remote_part > current_part;
+        }
+    }
+    false
+}
+
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let client = Client::builder()
+        .user_agent("WorkBuddyBar")
+        .build()
+        .map_err(|error| format!("初始化 HTTP 客户端失败：{error}"))?;
+    let release: Value = client
+        .get(GITHUB_LATEST_RELEASE_API)
+        .send()
+        .await
+        .map_err(|error| format!("请求更新信息失败：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("请求更新信息失败：{error}"))?
+        .json()
+        .await
+        .map_err(|error| format!("解析更新信息失败：{error}"))?;
+
+    let tag = value_string(release.get("tag_name"));
+    let current = app.package_info().version.to_string();
+    if !is_newer_version(&tag, &current) {
+        return Ok(None);
+    }
+
+    let installer_suffix = if cfg!(target_os = "windows") {
+        "windows-x64-setup.exe"
+    } else if cfg!(target_os = "macos") {
+        "macos-aarch64.dmg"
+    } else {
+        return Ok(None);
+    };
+    let assets = release
+        .get("assets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let Some(asset) = assets.iter().find(|asset| {
+        value_string(asset.get("name")).ends_with(installer_suffix)
+    }) else {
+        return Ok(None);
+    };
+
+    Ok(Some(UpdateInfo {
+        version: tag.trim_start_matches(['v', 'V']).to_string(),
+        notes: value_string(release.get("body")),
+        download_url: value_string(asset.get("browser_download_url")),
+        file_name: value_string(asset.get("name")),
+    }))
+}
+
+#[tauri::command]
+async fn download_update(
+    app: AppHandle,
+    url: String,
+    file_name: String,
+    on_event: Channel<UpdateDownloadEvent>,
+) -> Result<String, String> {
+    let client = Client::builder()
+        .user_agent("WorkBuddyBar")
+        .build()
+        .map_err(|error| format!("初始化 HTTP 客户端失败：{error}"))?;
+    let mut response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| format!("下载失败：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("下载失败：{error}"))?;
+
+    on_event
+        .send(UpdateDownloadEvent::Started {
+            content_length: response.content_length(),
+        })
+        .map_err(|error| format!("发送下载进度失败：{error}"))?;
+
+    // 文件名只取末段路径，避免远端名称带目录造成路径穿越。
+    let safe_name = std::path::Path::new(&file_name)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .ok_or_else(|| "安装包文件名无效".to_string())?;
+    let download_dir = app
+        .path()
+        .download_dir()
+        .map_err(|error| format!("定位下载文件夹失败：{error}"))?;
+    let target = download_dir.join(safe_name);
+    let mut file = tokio::fs::File::create(&target)
+        .await
+        .map_err(|error| format!("创建安装包文件失败：{error}"))?;
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| format!("下载失败：{error}"))?
+    {
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| format!("写入安装包失败：{error}"))?;
+        on_event
+            .send(UpdateDownloadEvent::Progress {
+                chunk_length: chunk.len() as u64,
+            })
+            .map_err(|error| format!("发送下载进度失败：{error}"))?;
+    }
+    file.flush()
+        .await
+        .map_err(|error| format!("写入安装包失败：{error}"))?;
+    drop(file);
+    on_event
+        .send(UpdateDownloadEvent::Finished)
+        .map_err(|error| format!("发送下载进度失败：{error}"))?;
+
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(format!("/select,{path}"))
+            .spawn()
+            .map_err(|error| format!("打开文件位置失败：{error}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| format!("打开文件位置失败：{error}"))?;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = path;
+    Ok(())
+}
+
 #[tauri::command]
 fn resize_popover(app: AppHandle, height: f64) -> Result<(), String> {
     let window = app
@@ -1639,8 +1830,6 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .setup(|app| {
             let state = app.state::<AppState>();
@@ -1700,6 +1889,9 @@ pub fn run() {
             save_settings,
             open_settings,
             resize_popover,
+            check_update,
+            download_update,
+            reveal_path,
             open_manager,
             quit_app
         ])
@@ -1719,6 +1911,16 @@ pub fn run() {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn compares_versions_numerically() {
+        assert!(is_newer_version("v1.0.8", "1.0.7"));
+        assert!(is_newer_version("1.1.0", "1.0.99"));
+        assert!(is_newer_version("v2.0.0", "1.9.9"));
+        assert!(!is_newer_version("v1.0.7", "1.0.7"));
+        assert!(!is_newer_version("1.0.6", "1.0.7"));
+        assert!(!is_newer_version("v1.0", "1.0.7"));
+    }
 
     #[test]
     fn normalizes_base_url() {

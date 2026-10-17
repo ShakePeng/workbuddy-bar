@@ -32,9 +32,10 @@ const {
   notes: updateNotes,
   progressPercent: updateProgressPercent,
   progressLabel: updateProgressLabel,
+  savedPath: updateSavedPath,
   error: updateError,
   checkForUpdates,
-  installUpdate,
+  downloadUpdate,
 } = useUpdater();
 const { message: toastMessage, kind: toastKind, show: showToast } = useToast();
 
@@ -228,11 +229,12 @@ onMounted(async () => {
             type="button"
             class="primary-button"
             :disabled="updateStatus == 'downloading'"
-            @click="installUpdate"
+            @click="downloadUpdate"
           >
-            {{ updateStatus == "downloading" ? "下载中 " + updateProgressPercent + "%" : "立即更新 v" + updateVersion }}
+            {{ updateStatus == "downloading" ? "下载中 " + updateProgressPercent + "%" : "下载 v" + updateVersion }}
           </button>
         </div>
+        <p v-if="updateStatus == 'downloaded'" class="update-hint">安装包已下载到：{{ updateSavedPath }}</p>
         <div v-if="updateStatus == 'downloading'" class="progress-track">
           <i :style="{ width: `${updateProgressPercent}%` }"></i>
         </div>

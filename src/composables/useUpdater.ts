@@ -1,8 +1,26 @@
 import { computed, ref } from "vue";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
-export type UpdaterStatus = "idle" | "checking" | "up-to-date" | "available" | "downloading" | "error";
+export type UpdaterStatus =
+  | "idle"
+  | "checking"
+  | "up-to-date"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+interface UpdateInfo {
+  version: string;
+  notes: string;
+  downloadUrl: string;
+  fileName: string;
+}
+
+type DownloadEvent =
+  | { event: "Started"; contentLength?: number }
+  | { event: "Progress"; chunkLength: number }
+  | { event: "Finished" };
 
 function formatBytes(value: number): string {
   if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
@@ -16,8 +34,9 @@ export function useUpdater() {
   const notes = ref("");
   const downloaded = ref(0);
   const total = ref(0);
+  const savedPath = ref("");
   const error = ref("");
-  let pendingUpdate: Update | null = null;
+  let pendingUpdate: UpdateInfo | null = null;
 
   const progressPercent = computed(() => {
     if (total.value > 0) {
@@ -36,18 +55,19 @@ export function useUpdater() {
     error.value = "";
     version.value = "";
     notes.value = "";
+    savedPath.value = "";
     downloaded.value = 0;
     total.value = 0;
     pendingUpdate = null;
     try {
-      const update = await check();
+      const update = await invoke<UpdateInfo | null>("check_update");
       if (update == null) {
         status.value = "up-to-date";
         return;
       }
       pendingUpdate = update;
       version.value = update.version;
-      notes.value = update.body ?? "";
+      notes.value = update.notes;
       status.value = "available";
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason);
@@ -55,7 +75,7 @@ export function useUpdater() {
     }
   }
 
-  async function installUpdate() {
+  async function downloadUpdate() {
     if (pendingUpdate == null) {
       status.value = "idle";
       return;
@@ -66,18 +86,21 @@ export function useUpdater() {
     total.value = 0;
     try {
       const update = pendingUpdate;
-      await update.downloadAndInstall(
-        (event) => {
-          if (event.event == "Started" && event.data.contentLength) {
-            total.value = event.data.contentLength;
-          } else if (event.event == "Progress") {
-            downloaded.value += event.data.chunkLength;
-          }
-        },
-        { restartAfterInstall: true },
-      );
-      // Windows 上安装器启动后本进程直接退出，不会走到这里；macOS 需要手动重启新版本。
-      await relaunch();
+      const channel = new Channel<DownloadEvent>();
+      channel.onmessage = (event) => {
+        if (event.event == "Started") {
+          total.value = event.contentLength ?? 0;
+        } else if (event.event == "Progress") {
+          downloaded.value += event.chunkLength;
+        }
+      };
+      savedPath.value = await invoke<string>("download_update", {
+        url: update.downloadUrl,
+        fileName: update.fileName,
+        onEvent: channel,
+      });
+      status.value = "downloaded";
+      await invoke("reveal_path", { path: savedPath.value });
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason);
       status.value = "error";
@@ -90,8 +113,9 @@ export function useUpdater() {
     notes,
     progressPercent,
     progressLabel,
+    savedPath,
     error,
     checkForUpdates,
-    installUpdate,
+    downloadUpdate,
   };
 }

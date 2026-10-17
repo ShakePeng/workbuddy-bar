@@ -29,9 +29,10 @@ const {
   notes: updateNotes,
   progressPercent: updateProgressPercent,
   progressLabel: updateProgressLabel,
+  savedPath: updateSavedPath,
   error: updateError,
   checkForUpdates,
-  installUpdate,
+  downloadUpdate,
 } = useUpdater();
 const updateBusy = computed(
   () => updateStatus.value == "checking" || updateStatus.value == "downloading",
@@ -321,7 +322,7 @@ onUnmounted(() => {
           <b>v{{ updateVersion }}</b>
         </div>
         <p v-if="updateNotes" class="update-notes">{{ updateNotes }}</p>
-        <button class="primary-button update-button" type="button" @click="installUpdate">立即更新</button>
+        <button class="primary-button update-button" type="button" @click="downloadUpdate">下载最新版本</button>
       </template>
       <div v-else-if="updateStatus == 'downloading'" class="update-progress">
         <div class="update-head">
@@ -330,6 +331,13 @@ onUnmounted(() => {
         </div>
         <div class="progress-track"><i :style="{ width: `${updateProgressPercent}%` }"></i></div>
         <small>{{ updateProgressLabel }}</small>
+      </div>
+      <div v-else-if="updateStatus == 'downloaded'" class="update-progress">
+        <div class="update-head">
+          <span>安装包已下载</span>
+        </div>
+        <p class="update-notes">{{ updateSavedPath }}</p>
+        <small>请运行安装包完成更新，完成后重新打开应用。</small>
       </div>
     </section>
 

@@ -151,8 +151,6 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_LTO: thin
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: yarn tauri build ${{ matrix.app_args }}
 
       - name: Collect macOS app archive
@@ -169,21 +167,12 @@ jobs:
           fi
           mkdir -p release
           ditto -c -k --keepParent "$app_path" "release/WorkBuddyBar-${TAG_NAME}-macos-aarch64.app.zip"
-          updater_archive="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
-          if [[ -z "$updater_archive" || ! -f "${updater_archive}.sig" ]]; then
-            echo 'No signed macOS updater archive was produced' >&2
-            exit 1
-          fi
-          cp "$updater_archive" "release/WorkBuddyBar-${TAG_NAME}-macos-aarch64.app.tar.gz"
-          cp "${updater_archive}.sig" "release/WorkBuddyBar-${TAG_NAME}-macos-aarch64.app.tar.gz.sig"
 
       - name: Build macOS DMG bundle
         if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
         env:
           CARGO_PROFILE_RELEASE_LTO: thin
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: yarn tauri build ${{ matrix.dmg_args }}
 
       - name: Collect macOS installer
@@ -206,8 +195,6 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_LTO: thin
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: yarn tauri build ${{ matrix.build_args }}
 
       - name: Collect Windows installer
@@ -218,11 +205,8 @@ jobs:
         run: |
           $installer = Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*.exe' | Select-Object -First 1
           if (-not $installer) { throw 'No Windows NSIS installer was produced' }
-          $signature = Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*.exe.sig' | Select-Object -First 1
-          if (-not $signature) { throw 'No Windows NSIS updater signature was produced' }
           New-Item -ItemType Directory -Path release -Force | Out-Null
           Copy-Item -LiteralPath $installer.FullName -Destination "release/WorkBuddyBar-$env:TAG_NAME-windows-x64-setup.exe"
-          Copy-Item -LiteralPath $signature.FullName -Destination "release/WorkBuddyBar-$env:TAG_NAME-windows-x64-setup.exe.sig"
 
       - name: Upload platform installer
         if: startsWith(github.ref, 'refs/tags/')
@@ -257,9 +241,6 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -type f -name '*.app.zip' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -type f -name '*.exe' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -type f -name '*.app.tar.gz.sig' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -type f -name '*.exe.sig' -print -quit)"
           find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
 
       # 更新内容取自 CHANGELOG.md 中该版本的段落，后面固定附上安装说明。
@@ -295,44 +276,6 @@ jobs:
           } > RELEASE_BODY.md
 
           cat RELEASE_BODY.md
-
-      - name: Generate updater manifest
-        shell: bash
-        env:
-          TAG_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-
-          version="${TAG_NAME#v}"
-          notes="$(awk -v version="$version" '
-            $0 ~ "^## \\[" version "\\]" { inside = 1; next }
-            inside && /^## \[/ { exit }
-            inside { print }
-          ' CHANGELOG.md)"
-          mac_signature="$(cat "release-assets/WorkBuddyBar-${TAG_NAME}-macos-aarch64.app.tar.gz.sig")"
-          windows_signature="$(cat "release-assets/WorkBuddyBar-${TAG_NAME}-windows-x64-setup.exe.sig")"
-          base_url="https://github.com/ShakePeng/workbuddy-bar/releases/download/${TAG_NAME}"
-          pub_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-          jq -n \
-            --arg version "$version" \
-            --arg notes "$notes" \
-            --arg pub_date "$pub_date" \
-            --arg mac_url "${base_url}/WorkBuddyBar-${TAG_NAME}-macos-aarch64.app.tar.gz" \
-            --arg mac_signature "$mac_signature" \
-            --arg windows_url "${base_url}/WorkBuddyBar-${TAG_NAME}-windows-x64-setup.exe" \
-            --arg windows_signature "$windows_signature" \
-            '{
-              version: $version,
-              notes: $notes,
-              pub_date: $pub_date,
-              platforms: {
-                "darwin-aarch64": { signature: $mac_signature, url: $mac_url },
-                "windows-x64": { signature: $windows_signature, url: $windows_url }
-              }
-            }' > release-assets/latest.json
-
-          cat release-assets/latest.json
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
