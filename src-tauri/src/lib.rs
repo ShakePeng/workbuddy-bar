@@ -12,15 +12,15 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-use tokio::io::AsyncWriteExt;
 use tauri::image::Image;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::ipc::Channel;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 #[cfg(not(target_os = "windows"))]
 use tauri::LogicalPosition;
 use tauri::{AppHandle, Emitter, Manager, Position, State};
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use tokio::io::AsyncWriteExt;
 use url::Url;
 
 const TRAY_ID: &str = "workbuddybar";
@@ -936,12 +936,20 @@ fn publish(app: &AppHandle, snapshot: AppSnapshot) {
 }
 
 fn publish_error(app: &AppHandle, error: impl Into<String>) {
+    publish_error_with_auth_state(app, error, false);
+}
+
+fn publish_login_error(app: &AppHandle, error: impl Into<String>) {
+    publish_error_with_auth_state(app, error, true);
+}
+
+fn publish_error_with_auth_state(app: &AppHandle, error: impl Into<String>, require_login: bool) {
     let state = app.state::<AppState>();
     let mut snapshot = state.snapshot();
     snapshot.updated_at = now_secs();
     snapshot.stale = true;
     snapshot.error = Some(error.into());
-    snapshot.auth_state = if snapshot.last_success_at == 0 {
+    snapshot.auth_state = if require_login || snapshot.last_success_at == 0 {
         "login_required".into()
     } else {
         "error".into()
@@ -987,7 +995,7 @@ async fn refresh_state(app: &AppHandle) -> AppSnapshot {
                 outcome = fetch_snapshot(&state.http, &config).await;
             }
             Err(error) => {
-                publish_error(app, error.to_string());
+                publish_login_error(app, error.to_string());
                 present_login(app);
                 return state.snapshot();
             }
@@ -1004,7 +1012,7 @@ async fn refresh_state(app: &AppHandle) -> AppSnapshot {
         }
         // 凭据被删除、过期或管理端重置了密钥：直接把登录窗口叫回来让用户重填。
         Err(ApiError::AuthExpired) => {
-            publish_error(app, auth_expired_message(&config));
+            publish_login_error(app, auth_expired_message(&config));
             present_login(app);
             state.snapshot()
         }
@@ -1179,7 +1187,21 @@ fn place_popover_from_anchor(
     clamp_popover_position(x, y, width, height, left, top, right, bottom)
 }
 
+fn should_present_login(config: &AppConfig, snapshot: &AppSnapshot) -> bool {
+    !config.can_refresh() || snapshot.auth_state == "login_required"
+}
+
+fn should_present_login_window(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    should_present_login(&state.config(), &state.snapshot())
+}
+
 fn toggle_popover(app: &AppHandle) {
+    if should_present_login_window(app) {
+        present_login(app);
+        return;
+    }
+
     let Some(window) = app.get_webview_window("popover") else {
         return;
     };
@@ -2375,7 +2397,11 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_popover_centered(app);
+            if should_present_login_window(app) {
+                present_login(app);
+            } else {
+                show_popover_centered(app);
+            }
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -2805,6 +2831,28 @@ mod tests {
         assert!(!config.can_refresh());
         config.session_cookie = "sess".into();
         assert!(config.can_refresh());
+    }
+
+    #[test]
+    fn presents_login_only_when_authentication_is_required() {
+        let mut config = AppConfig::default();
+        let mut snapshot = AppSnapshot::default();
+
+        // 没有凭据时必须展示登录页，不能进入空数据弹层。
+        assert!(should_present_login(&config, &snapshot));
+
+        config.base_url = "http://host:1".into();
+        config.token = "wbt_x".into();
+        snapshot.auth_state = "ok".into();
+        assert!(!should_present_login(&config, &snapshot));
+
+        snapshot.auth_state = "login_required".into();
+        assert!(should_present_login(&config, &snapshot));
+
+        // 已登录过但暂时请求失败时仍展示缓存数据，不把用户赶回登录页。
+        snapshot.auth_state = "error".into();
+        snapshot.last_success_at = 1;
+        assert!(!should_present_login(&config, &snapshot));
     }
 
     #[test]

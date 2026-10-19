@@ -943,7 +943,7 @@ button:disabled {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -951,6 +951,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 11px;
+  min-width: 0;
   padding: 15px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1058,6 +1059,11 @@ button:disabled {
   .icon-button,
   .popover-footer button {
     background: rgba(58, 58, 61, 0.7);
+  }
+
+  .secondary-button:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(82, 82, 88, 0.92);
   }
 
   .popover-page {
