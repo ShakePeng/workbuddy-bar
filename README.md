@@ -18,12 +18,9 @@
 - macOS Apple Silicon：下载 `WorkBuddyBar-vX.Y.Z-macos-aarch64.dmg`，安装后从“应用程序”启动。
 - Windows x64：下载 `WorkBuddyBar-vX.Y.Z-windows-x64-setup.exe`，按安装向导完成安装。
 
-当前安装包未进行 Apple 签名/公证和 Windows 代码签名，首次启动可能出现系统安全提示：
+当前 macOS 安装包使用 ad-hoc 签名但未公证，Windows 安装包未进行代码签名，首次启动可能出现系统安全提示：
 
-- macOS 若被 Gatekeeper 拦截，请右键应用选择“打开”；也可以在终端执行：
-  ```bash
-  xattr -dr com.apple.quarantine /Applications/WorkBuddyBar.app
-  ```
+- macOS 若被 Gatekeeper 拦截，请进入“系统设置 → 隐私与安全性”，在“安全性”区域点击“仍要打开”，再确认“打开”。每个新下载安装的版本首次启动时可能需要手动放行一次，无需执行终端命令。
 - Windows 若出现 SmartScreen 提示，请选择“更多信息”，然后点击“仍要运行”。
 
 ## 开发
