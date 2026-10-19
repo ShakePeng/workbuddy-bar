@@ -1,0 +1,39 @@
+CHANGELOG.md
+  s_300ef8ad6b1137::t_091d48804de56c 14
+  s_300ef8ad6b1137::t_748dfd11d23f40 10-13,16
+  s_300ef8ad6b1137::t_f423f647b62422 15
+src-tauri/src/lib.rs
+  s_300ef8ad6b1137::t_9afd95fc5db391 17,22-23
+  s_300ef8ad6b1137::t_f423f647b62422 1190-1198,1200-1204,2400-2404
+  s_300ef8ad6b1137::t_a99c2190f23323 939-945,952,998,1015
+  s_300ef8ad6b1137::t_cf05b5360d29d3 2837-2857
+  s_300ef8ad6b1137::t_7dcf1f34543a3a 946
+  s_300ef8ad6b1137::t_062f9f1f4ca174 2836
+src-tauri/tauri.conf.json
+  s_300ef8ad6b1137::t_748dfd11d23f40 4
+package.json
+  s_300ef8ad6b1137::t_748dfd11d23f40 4
+src/style.css
+  s_300ef8ad6b1137::t_091d48804de56c 1064-1068
+  s_300ef8ad6b1137::t_748dfd11d23f40 946,954
+src-tauri/Cargo.toml
+  s_300ef8ad6b1137::t_748dfd11d23f40 3
+src-tauri/Cargo.lock
+  s_300ef8ad6b1137::t_f3e731a4ae5c82 5114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "e41842eb2d36779adef3b149f6dd818d0932b938",
+  "prompts": {},
+  "sessions": {
+    "s_300ef8ad6b1137": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a151b6-9460-7ea2-a0fe-0467c57ec7d8",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
