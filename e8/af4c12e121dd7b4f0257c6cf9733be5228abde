@@ -1,0 +1,31 @@
+package.json
+  s_300ef8ad6b1137::t_6ab9d28fab9d44 4
+README.md
+  s_300ef8ad6b1137::t_6ab9d28fab9d44 21,23
+src-tauri/tauri.conf.json
+  s_300ef8ad6b1137::t_6ab9d28fab9d44 4,74
+.github/workflows/release.yml
+  s_300ef8ad6b1137::t_6ab9d28fab9d44 33-34,156-181,366
+CHANGELOG.md
+  s_300ef8ad6b1137::t_6ab9d28fab9d44 10-19
+src-tauri/Cargo.toml
+  s_300ef8ad6b1137::t_6ab9d28fab9d44 3
+src-tauri/Cargo.lock
+  s_300ef8ad6b1137::t_20b2fa7490c468 5114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "e8af4c12e121dd7b4f0257c6cf9733be5228abde",
+  "prompts": {},
+  "sessions": {
+    "s_300ef8ad6b1137": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a151b6-9460-7ea2-a0fe-0467c57ec7d8",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
