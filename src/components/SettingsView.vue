@@ -20,6 +20,11 @@ const form = ref<SettingsInput>({
   refreshIntervalSec: 120,
   lowCreditThreshold: 1000,
   launchAtLogin: false,
+  singleColumn: false,
+  showCreditOverview: true,
+  showUsage: true,
+  showAccounts: true,
+  showKeys: true,
 });
 const showToken = ref(false);
 const showPassword = ref(false);
@@ -69,6 +74,11 @@ async function load() {
       refreshIntervalSec: value.refreshIntervalSec,
       lowCreditThreshold: value.lowCreditThreshold,
       launchAtLogin: value.launchAtLogin,
+      singleColumn: value.singleColumn,
+      showCreditOverview: value.showCreditOverview,
+      showUsage: value.showUsage,
+      showAccounts: value.showAccounts,
+      showKeys: value.showKeys,
     };
   } catch (reason) {
     error.value = String(reason);
@@ -201,6 +211,41 @@ onMounted(async () => {
           </span>
           <input v-model="form.launchAtLogin" type="checkbox" />
         </label>
+      </section>
+
+      <section class="settings-section wide">
+        <h2>首页展示</h2>
+        <label class="switch-row">
+          <span>
+            <b>单列展示</b>
+            <small>默认关闭；关闭时保持当前两列布局</small>
+          </span>
+          <input v-model="form.singleColumn" type="checkbox" />
+        </label>
+        <div class="module-setting">
+          <span>
+            <b>展示模块</b>
+            <small>取消勾选后不在首页展示，默认全部勾选</small>
+          </span>
+          <div class="module-options">
+            <label>
+              <input v-model="form.showCreditOverview" type="checkbox" />
+              <span>积分概览</span>
+            </label>
+            <label>
+              <input v-model="form.showUsage" type="checkbox" />
+              <span>今日用量</span>
+            </label>
+            <label>
+              <input v-model="form.showAccounts" type="checkbox" />
+              <span>账号明细</span>
+            </label>
+            <label>
+              <input v-model="form.showKeys" type="checkbox" />
+              <span>密钥用量</span>
+            </label>
+          </div>
+        </div>
       </section>
 
       <section class="settings-section">

@@ -78,7 +78,15 @@ export interface AppSnapshot {
   error: string | null;
 }
 
-export interface SettingsView {
+export interface HomepageSettings {
+  singleColumn: boolean;
+  showCreditOverview: boolean;
+  showUsage: boolean;
+  showAccounts: boolean;
+  showKeys: boolean;
+}
+
+export interface SettingsView extends HomepageSettings {
   baseUrl: string;
   authMode: AuthMode;
   token: string;

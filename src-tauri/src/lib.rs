@@ -25,7 +25,8 @@ use url::Url;
 
 const TRAY_ID: &str = "workbuddybar";
 const EVENT_SNAPSHOT: &str = "snapshot-changed";
-const CONFIG_VERSION: u32 = 4;
+const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
+const CONFIG_VERSION: u32 = 5;
 const AUTH_MODE_TOKEN: &str = "token";
 const AUTH_MODE_PASSWORD: &str = "password";
 // 管理端会话 Cookie 名称，登录后按原值回传，续期时以响应里的新值为准。
@@ -33,6 +34,10 @@ const SESSION_COOKIE_NAME: &str = "wb_session";
 
 fn default_auth_mode() -> String {
     AUTH_MODE_TOKEN.to_string()
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,6 +64,17 @@ struct AppConfig {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    // 首页展示选项。旧配置没有这些字段时保持当前两列布局，并默认展示全部模块。
+    #[serde(default)]
+    single_column: bool,
+    #[serde(default = "default_enabled")]
+    show_credit_overview: bool,
+    #[serde(default = "default_enabled")]
+    show_usage: bool,
+    #[serde(default = "default_enabled")]
+    show_accounts: bool,
+    #[serde(default = "default_enabled")]
+    show_keys: bool,
 }
 
 impl Default for AppConfig {
@@ -74,6 +90,11 @@ impl Default for AppConfig {
             refresh_interval_sec: 120,
             low_credit_threshold: 1000.0,
             launch_at_login: false,
+            single_column: false,
+            show_credit_overview: true,
+            show_usage: true,
+            show_accounts: true,
+            show_keys: true,
         }
     }
 }
@@ -228,6 +249,11 @@ struct SettingsView {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    single_column: bool,
+    show_credit_overview: bool,
+    show_usage: bool,
+    show_accounts: bool,
+    show_keys: bool,
     config_path: String,
 }
 
@@ -241,6 +267,11 @@ struct SettingsInput {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    single_column: bool,
+    show_credit_overview: bool,
+    show_usage: bool,
+    show_accounts: bool,
+    show_keys: bool,
 }
 
 #[derive(Debug)]
@@ -1630,6 +1661,11 @@ fn get_settings(app: AppHandle, state: State<'_, AppState>) -> Result<SettingsVi
         refresh_interval_sec: config.refresh_interval_sec,
         low_credit_threshold: config.low_credit_threshold,
         launch_at_login: config.launch_at_login,
+        single_column: config.single_column,
+        show_credit_overview: config.show_credit_overview,
+        show_usage: config.show_usage,
+        show_accounts: config.show_accounts,
+        show_keys: config.show_keys,
         config_path: config_path(&app)
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default(),
@@ -1670,8 +1706,14 @@ async fn save_settings(
     config.refresh_interval_sec = interval;
     config.low_credit_threshold = threshold;
     config.launch_at_login = settings.launch_at_login;
+    config.single_column = settings.single_column;
+    config.show_credit_overview = settings.show_credit_overview;
+    config.show_usage = settings.show_usage;
+    config.show_accounts = settings.show_accounts;
+    config.show_keys = settings.show_keys;
     save_config(&app, &config)?;
     state.set_config(config.clone());
+    let _ = app.emit(EVENT_SETTINGS_CHANGED, ());
     apply_autostart(&app, config.launch_at_login)?;
     let snapshot = refresh_state(&app).await;
     Ok(snapshot)
@@ -2275,27 +2317,33 @@ fn reveal_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn resize_popover(app: AppHandle, height: f64) -> Result<(), String> {
+fn resize_popover(app: AppHandle, height: f64, width: Option<f64>) -> Result<(), String> {
     let window = app
         .get_webview_window("popover")
         .ok_or_else(|| "弹层窗口不存在".to_string())?;
     let scale = window.scale_factor().map_err(|error| error.to_string())?;
     let size = window.outer_size().map_err(|error| error.to_string())?;
     let logical_size = size.to_logical::<f64>(scale);
-    let max_height = window
-        .current_monitor()
-        .ok()
-        .flatten()
+    let monitor = window.current_monitor().ok().flatten();
+    let max_height = monitor
+        .as_ref()
         .map(|monitor| monitor.work_area().size.height as f64 / monitor.scale_factor() - 16.0)
         .unwrap_or(1000.0)
         .max(320.0);
+    let max_width = monitor
+        .as_ref()
+        .map(|monitor| monitor.work_area().size.width as f64 / monitor.scale_factor() - 16.0)
+        .unwrap_or(1200.0);
     let target_height = height.clamp(320.0, max_height);
+    let target_width = width
+        .unwrap_or(logical_size.width)
+        .clamp(360.0, max_width.max(360.0));
     let previous_position = window.outer_position().ok();
     let previous_size = size;
 
     window
         .set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-            logical_size.width,
+            target_width,
             target_height,
         )))
         .map_err(|error| error.to_string())?;
@@ -2778,6 +2826,12 @@ mod tests {
         assert_eq!(config.auth_mode, AUTH_MODE_TOKEN);
         assert_eq!(config.token, "wbt_abc");
         assert_eq!(config.base_url, "http://47.99.55.3:7864");
+        // 新增首页展示配置必须有兼容默认值：两列布局且四个模块全部展示。
+        assert!(!config.single_column);
+        assert!(config.show_credit_overview);
+        assert!(config.show_usage);
+        assert!(config.show_accounts);
+        assert!(config.show_keys);
     }
 
     #[test]

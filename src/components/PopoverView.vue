@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AccountView, AppSnapshot } from "../types";
+import type { AccountView, AppSnapshot, HomepageSettings, SettingsView } from "../types";
 import { useToast } from "../composables/useToast";
 import { useUpdater } from "../composables/useUpdater";
 import {
@@ -22,11 +22,22 @@ const refreshing = ref(false);
 const actionError = ref("");
 const content = ref<HTMLElement | null>(null);
 let unlisten: UnlistenFn | undefined;
+let unlistenSettings: UnlistenFn | undefined;
 let resizeTimer = 0;
 let resizeObserver: ResizeObserver | undefined;
 let lastReportedHeight = 0;
+let lastReportedWidth = 0;
 const currentVersion = ref("");
 const EXPIRY_REMINDER_DAYS = 2;
+const SINGLE_COLUMN_WIDTH = 375;
+const TWO_COLUMN_WIDTH = 720;
+const displaySettings = ref<HomepageSettings>({
+  singleColumn: false,
+  showCreditOverview: true,
+  showUsage: true,
+  showAccounts: true,
+  showKeys: true,
+});
 
 const {
   status: updateStatus,
@@ -109,6 +120,15 @@ const keyUsageTotal = computed(() =>
     { todayTokens: 0, totalTokens: 0 },
   ),
 );
+const visibleModuleCount = computed(
+  () =>
+    Number(displaySettings.value.showCreditOverview) +
+    Number(displaySettings.value.showUsage) +
+    Number(displaySettings.value.showAccounts) +
+    Number(displaySettings.value.showKeys),
+);
+const hasVisibleModules = computed(() => visibleModuleCount.value > 0);
+
 function nextCreditExpiry(account: AccountView) {
   return account.creditExpiries?.[0] ?? null;
 }
@@ -145,10 +165,14 @@ async function resizeToContent() {
   const element = content.value;
   if (!element) return;
   const height = Math.ceil(element.getBoundingClientRect().height + 28);
-  if (Math.abs(height - lastReportedHeight) < 1) return;
+  const width = displaySettings.value.singleColumn ? SINGLE_COLUMN_WIDTH : TWO_COLUMN_WIDTH;
+  const sizeChanged =
+    Math.abs(height - lastReportedHeight) >= 1 || Math.abs(width - lastReportedWidth) >= 1;
+  if (!sizeChanged) return;
   lastReportedHeight = height;
+  lastReportedWidth = width;
   try {
-    await invoke("resize_popover", { height });
+    await invoke("resize_popover", { height, width });
   } catch (reason) {
     actionError.value = String(reason);
   }
@@ -157,6 +181,22 @@ async function resizeToContent() {
 async function load() {
   try {
     snapshot.value = await invoke<AppSnapshot>("load_state");
+  } catch (reason) {
+    actionError.value = String(reason);
+  }
+}
+
+async function loadDisplaySettings() {
+  try {
+    const settings = await invoke<SettingsView>("get_settings");
+    displaySettings.value = {
+      singleColumn: settings.singleColumn,
+      showCreditOverview: settings.showCreditOverview,
+      showUsage: settings.showUsage,
+      showAccounts: settings.showAccounts,
+      showKeys: settings.showKeys,
+    };
+    scheduleResize();
   } catch (reason) {
     actionError.value = String(reason);
   }
@@ -193,6 +233,7 @@ async function logout() {
 onMounted(async () => {
   currentVersion.value = await getVersion().catch(() => "");
   await load();
+  await loadDisplaySettings();
   if (content.value) {
     resizeObserver = new ResizeObserver(scheduleResize);
     resizeObserver.observe(content.value);
@@ -201,12 +242,16 @@ onMounted(async () => {
   unlisten = await listen<AppSnapshot>("snapshot-changed", (event) => {
     snapshot.value = event.payload;
   });
+  unlistenSettings = await listen("settings-changed", () => {
+    void loadDisplaySettings();
+  });
 });
 
 onUnmounted(() => {
   window.clearTimeout(resizeTimer);
   resizeObserver?.disconnect();
   unlisten?.();
+  unlistenSettings?.();
 });
 </script>
 
@@ -230,8 +275,17 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <div class="popover-grid">
-      <section class="hero-card" :class="statusTone">
+    <div
+      v-if="hasVisibleModules"
+      :class="[
+        'popover-grid',
+        {
+          'single-column': displaySettings.singleColumn,
+          'single-item': visibleModuleCount == 1,
+        },
+      ]"
+    >
+      <section v-if="displaySettings.showCreditOverview" class="hero-card" :class="statusTone">
         <div class="hero-top">
           <span>积分概览</span>
           <span class="freshness">{{ lastUpdated }}</span>
@@ -253,7 +307,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section class="section-card usage-card">
+      <section v-if="displaySettings.showUsage" class="section-card usage-card">
         <div class="section-title">
           <h2>今日用量</h2>
         </div>
@@ -283,7 +337,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section class="section-card accounts-card">
+      <section v-if="displaySettings.showAccounts" class="section-card accounts-card">
         <div class="section-title">
           <h2>账号明细</h2>
           <span>{{ snapshot?.accounts.length ?? 0 }} 个</span>
@@ -315,7 +369,7 @@ onUnmounted(() => {
         <div v-else class="empty-state">暂未读取到账号数据</div>
       </section>
 
-      <section v-if="snapshot" class="section-card keys-card">
+      <section v-if="snapshot && displaySettings.showKeys" class="section-card keys-card">
         <div class="section-title">
           <h2>密钥用量</h2>
           <span>{{ snapshot?.keyUsage.length ?? 0 }} 个</span>
