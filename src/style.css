@@ -812,9 +812,18 @@ button:disabled {
   white-space: pre-line;
 }
 
+.update-action-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .update-button {
-  height: 30px;
-  font-size: 10.5px;
+  min-height: 26px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 9.5px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14);
 }
 
 .update-progress {

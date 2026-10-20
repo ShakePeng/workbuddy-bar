@@ -418,9 +418,11 @@ onUnmounted(() => {
           <b>v{{ updateVersion }}</b>
         </div>
         <p v-if="updateNotes" class="update-notes">{{ updateNotes }}</p>
-        <button class="primary-button update-button" type="button" @click="downloadUpdate">
-          {{ updateSelfUpdate ? "更新并重启" : "下载最新版本" }}
-        </button>
+        <div class="update-action-row">
+          <button class="primary-button update-button" type="button" @click="downloadUpdate">
+            {{ updateSelfUpdate ? "更新并重启" : "下载最新版本" }}
+          </button>
+        </div>
       </template>
       <div v-else-if="updateStatus == 'downloading'" class="update-progress">
         <div class="update-head">
