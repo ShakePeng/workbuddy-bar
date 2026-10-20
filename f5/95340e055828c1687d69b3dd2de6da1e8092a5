@@ -1,0 +1,21 @@
+src/components/PopoverView.vue
+  s_ee2599f8a14fa4::t_69c74192050bba 421-425
+src/style.css
+  s_ee2599f8a14fa4::t_69c74192050bba 815-819,821-826
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "f595340e055828c1687d69b3dd2de6da1e8092a5",
+  "prompts": {},
+  "sessions": {
+    "s_ee2599f8a14fa4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a156ea-5a0e-7400-8972-51b999a189b0",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
