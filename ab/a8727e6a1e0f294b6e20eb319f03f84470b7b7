@@ -1,0 +1,52 @@
+src-tauri/tauri.conf.json
+  s_ee2599f8a14fa4::t_fccbc3ebd520ee 4
+src/main.ts
+  s_ee2599f8a14fa4::t_d3246b330c18b7 3,6
+src/App.vue
+  s_ee2599f8a14fa4::t_d3246b330c18b7 2-4,8,12-15,17-33
+  s_ee2599f8a14fa4::t_f55298144ae3a6 9,16
+src/style.css
+  s_ee2599f8a14fa4::t_6027da9325c45a 1018-1019,1043-1044,1050-1051,1060-1061
+  s_ee2599f8a14fa4::t_af6c10194c4cfc 1062,1106-1116,1118-1123,1125-1129,1131-1137,1139-1142,1144-1146,1148-1151,1153-1159,1161-1164,1166-1169,1171-1175,1177-1182,1184-1186,1188-1190,1192-1194,1196-1198,1200-1202,1204-1206,1208-1210,1212-1214,1216-1218
+  s_ee2599f8a14fa4::t_82b8d18e392bff 1063
+src/lib/theme.ts
+  s_ee2599f8a14fa4::t_d3246b330c18b7 1-35
+package.json
+  s_ee2599f8a14fa4::t_fccbc3ebd520ee 4
+src-tauri/src/lib.rs
+  s_ee2599f8a14fa4::t_550b4c2415e5ac 46,137-144
+  s_ee2599f8a14fa4::t_cefa0afddaf6c1 430-435,2870
+  s_ee2599f8a14fa4::t_529f6d0b20f391 268,287
+  s_ee2599f8a14fa4::t_a56bd9c566d7e3 2855,2864-2869
+  s_ee2599f8a14fa4::t_d6cb13ec417cf3 1688,1734
+  s_ee2599f8a14fa4::t_f25f374b801a77 72-73,100
+  s_ee2599f8a14fa4::t_600c00819eb9ea 29,32,44-45
+  s_ee2599f8a14fa4::t_e5a117d8d63095 47
+  s_ee2599f8a14fa4::t_0cf6e02ba92d96 2871
+src/types.ts
+  s_ee2599f8a14fa4::t_d3246b330c18b7 3,93
+src-tauri/Cargo.toml
+  s_ee2599f8a14fa4::t_fccbc3ebd520ee 3
+src/components/SettingsView.vue
+  s_ee2599f8a14fa4::t_d3246b330c18b7 5,8,24,34-38,76,85,227-246
+CHANGELOG.md
+  s_ee2599f8a14fa4::t_fccbc3ebd520ee 10-19
+src-tauri/Cargo.lock
+  s_ee2599f8a14fa4::t_e5938c3a21a83f 5114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "aba8727e6a1e0f294b6e20eb319f03f84470b7b7",
+  "prompts": {},
+  "sessions": {
+    "s_ee2599f8a14fa4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a156ea-5a0e-7400-8972-51b999a189b0",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
