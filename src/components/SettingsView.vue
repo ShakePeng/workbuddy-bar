@@ -39,15 +39,8 @@ const themeOptions: Array<{ value: ThemeMode; label: string }> = [
 
 const {
   status: updateStatus,
-  version: updateVersion,
-  notes: updateNotes,
-  selfUpdate: updateSelfUpdate,
-  progressPercent: updateProgressPercent,
-  progressLabel: updateProgressLabel,
-  savedPath: updateSavedPath,
   error: updateError,
   checkForUpdates,
-  downloadUpdate,
 } = useUpdater();
 const { message: toastMessage, kind: toastKind, show: showToast } = useToast();
 
@@ -287,43 +280,12 @@ onMounted(async () => {
           <button
             type="button"
             class="secondary-button"
-            :disabled="
-              updateStatus == 'checking' ||
-              updateStatus == 'downloading' ||
-              updateStatus == 'installing'
-            "
+            :disabled="updateStatus == 'checking'"
             @click="checkForUpdates"
           >
             {{ updateStatus == "checking" ? "检查中…" : "检查更新" }}
           </button>
-          <button
-            v-if="
-              updateStatus == 'available' ||
-              updateStatus == 'downloading' ||
-              updateStatus == 'installing'
-            "
-            type="button"
-            class="primary-button"
-            :disabled="updateStatus == 'downloading' || updateStatus == 'installing'"
-            @click="downloadUpdate"
-          >
-            {{
-              updateStatus == "downloading"
-                ? "下载中 " + updateProgressPercent + "%"
-                : updateStatus == "installing"
-                  ? "正在安装并重启…"
-                  : (updateSelfUpdate ? "更新到 v" : "下载 v") + updateVersion
-            }}
-          </button>
         </div>
-        <p v-if="updateStatus == 'downloaded'" class="update-hint">安装包已下载到：{{ updateSavedPath }}</p>
-        <div v-if="updateStatus == 'downloading' || updateStatus == 'installing'" class="progress-track">
-          <i :style="{ width: `${updateProgressPercent}%` }"></i>
-        </div>
-        <p v-if="updateStatus == 'downloading' || updateStatus == 'installing'" class="update-hint">
-          {{ updateProgressLabel }}
-        </p>
-        <p v-if="updateStatus == 'available' && updateNotes" class="update-notes">{{ updateNotes }}</p>
       </section>
 
       <section class="settings-section compact">

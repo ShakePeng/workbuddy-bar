@@ -41,22 +41,10 @@ const displaySettings = ref<HomepageSettings>({
 
 const {
   status: updateStatus,
-  version: updateVersion,
-  notes: updateNotes,
-  selfUpdate: updateSelfUpdate,
-  progressPercent: updateProgressPercent,
-  progressLabel: updateProgressLabel,
-  savedPath: updateSavedPath,
   error: updateError,
   checkForUpdates,
-  downloadUpdate,
 } = useUpdater();
-const updateBusy = computed(
-  () =>
-    updateStatus.value == "checking" ||
-    updateStatus.value == "downloading" ||
-    updateStatus.value == "installing",
-);
+const updateBusy = computed(() => updateStatus.value == "checking");
 const { message: toastMessage, kind: toastKind, show: showToast } = useToast();
 const persistentError = computed(() => actionError.value || snapshot.value?.error || "");
 watch(
@@ -403,50 +391,6 @@ onUnmounted(() => {
       </section>
     </div>
 
-    <section
-      v-if="
-        updateStatus == 'available' ||
-        updateStatus == 'downloading' ||
-        updateStatus == 'installing' ||
-        updateStatus == 'downloaded'
-      "
-      class="section-card update-card"
-    >
-      <template v-if="updateStatus == 'available'">
-        <div class="update-head">
-          <span>发现新版本</span>
-          <b>v{{ updateVersion }}</b>
-        </div>
-        <p v-if="updateNotes" class="update-notes">{{ updateNotes }}</p>
-        <div class="update-action-row">
-          <button class="primary-button update-button" type="button" @click="downloadUpdate">
-            {{ updateSelfUpdate ? "更新并重启" : "下载最新版本" }}
-          </button>
-        </div>
-      </template>
-      <div v-else-if="updateStatus == 'downloading'" class="update-progress">
-        <div class="update-head">
-          <span>正在下载更新</span>
-          <b>{{ updateProgressPercent }}%</b>
-        </div>
-        <div class="progress-track"><i :style="{ width: `${updateProgressPercent}%` }"></i></div>
-        <small>{{ updateProgressLabel }}</small>
-      </div>
-      <div v-else-if="updateStatus == 'installing'" class="update-progress">
-        <div class="update-head">
-          <span>正在安装并重启</span>
-        </div>
-        <small>{{ updateProgressLabel }}</small>
-      </div>
-      <div v-else-if="updateStatus == 'downloaded'" class="update-progress">
-        <div class="update-head">
-          <span>安装包已下载</span>
-        </div>
-        <p class="update-notes">{{ updateSavedPath }}</p>
-        <small>请运行安装包完成更新，完成后重新打开应用。</small>
-      </div>
-    </section>
-
     <footer class="popover-footer">
       <button type="button" @click="openManager">
         <svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" /></svg>
@@ -454,7 +398,7 @@ onUnmounted(() => {
       </button>
       <button type="button" :disabled="updateBusy" @click="checkForUpdates">
         <svg viewBox="0 0 24 24"><path d="M12 3v11m0 0-4-4m4 4 4-4M4 21h16" /></svg>
-        检查更新
+        {{ updateBusy ? "检查中…" : "检查更新" }}
       </button>
       <button type="button" @click="openSettings">
         <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.42 1.42-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.04 1.56V20h-2v-.08A1.7 1.7 0 0 0 12 18.36a1.7 1.7 0 0 0-1.88.34l-.06.06-1.42-1.42.06-.06A1.7 1.7 0 0 0 9.04 15a1.7 1.7 0 0 0-1.56-1.04H7v-2h.48A1.7 1.7 0 0 0 9.04 10a1.7 1.7 0 0 0-.34-1.88l-.06-.06 1.42-1.42.06.06A1.7 1.7 0 0 0 12 7.04 1.7 1.7 0 0 0 13.04 5.48V5h2v.48A1.7 1.7 0 0 0 16.6 7a1.7 1.7 0 0 0 1.88-.34l.06-.06 1.42 1.42-.06.06A1.7 1.7 0 0 0 19.56 10a1.7 1.7 0 0 0 1.56 1.04H21v2h-.48A1.7 1.7 0 0 0 19.4 15Z" /></svg>

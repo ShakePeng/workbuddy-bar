@@ -1,6 +1,8 @@
 import { computed, ref } from "vue";
 import { Channel, invoke } from "@tauri-apps/api/core";
 
+export const UPDATE_WINDOW_OPENED_EVENT = "update-window-opened";
+
 export type UpdaterStatus =
   | "idle"
   | "checking"
@@ -11,7 +13,7 @@ export type UpdaterStatus =
   | "downloaded"
   | "error";
 
-interface UpdateInfo {
+export interface UpdateInfo {
   version: string;
   notes: string;
   downloadUrl: string;
@@ -51,65 +53,99 @@ export function useUpdater() {
   let pendingUpdate: UpdateInfo | null = null;
 
   const progressPercent = computed(() => {
+    if (status.value == "installing") return 100;
     if (total.value > 0) {
       return Math.min(100, Math.round((downloaded.value / total.value) * 100));
     }
     return 0;
   });
   const progressLabel = computed(() => {
-    if (status.value == "installing") return "正在安装并重启…";
+    if (status.value == "installing") return "正在准备安装并重启…";
     if (total.value > 0) return `${formatBytes(downloaded.value)} / ${formatBytes(total.value)}`;
     if (downloaded.value > 0) return `已下载 ${formatBytes(downloaded.value)}`;
-    return "连接中…";
+    return "正在连接更新服务器…";
   });
 
-  async function checkForUpdates() {
-    status.value = "checking";
-    error.value = "";
+  function reset() {
     version.value = "";
     notes.value = "";
     selfUpdate.value = false;
     savedPath.value = "";
     downloaded.value = 0;
     total.value = 0;
+    error.value = "";
     pendingUpdate = null;
+  }
+
+  function applyUpdate(update: UpdateInfo) {
+    pendingUpdate = update;
+    version.value = update.version;
+    notes.value = update.notes;
+    selfUpdate.value = update.selfUpdate;
+  }
+
+  async function checkForUpdates() {
+    reset();
+    status.value = "checking";
     try {
       const update = await invoke<UpdateInfo | null>("check_update");
       if (update == null) {
         status.value = "up-to-date";
         return;
       }
-      pendingUpdate = update;
-      version.value = update.version;
-      notes.value = update.notes;
-      selfUpdate.value = update.selfUpdate;
+      applyUpdate(update);
       status.value = "available";
+      await invoke("open_update_window");
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason);
       status.value = "error";
     }
   }
 
+  async function loadPendingUpdate() {
+    reset();
+    try {
+      const update = await invoke<UpdateInfo | null>("get_pending_update");
+      if (update == null) {
+        status.value = "idle";
+        return false;
+      }
+      applyUpdate(update);
+      status.value = "available";
+      return true;
+    } catch (reason) {
+      error.value = reason instanceof Error ? reason.message : String(reason);
+      status.value = "error";
+      return false;
+    }
+  }
+
   async function downloadUpdate() {
+    if (status.value == "downloading" || status.value == "installing") return;
     if (pendingUpdate == null) {
-      status.value = "idle";
+      error.value = "更新信息已失效，请关闭窗口后重新检查。";
+      status.value = "error";
       return;
     }
+
     status.value = "downloading";
     error.value = "";
+    savedPath.value = "";
     downloaded.value = 0;
     total.value = 0;
     try {
       const update = pendingUpdate;
-      const channel = new Channel<DownloadEvent>();
-      channel.onmessage = (event) => {
-        if (event.event == "Started") {
-          total.value = event.contentLength ?? 0;
-        } else if (event.event == "Progress") {
-          downloaded.value += event.chunkLength;
-        }
-      };
       if (update.selfUpdate && update.sha256) {
+        const channel = new Channel<DownloadEvent>();
+        channel.onmessage = (event) => {
+          if (event.event == "Started") {
+            total.value = event.contentLength ?? 0;
+          } else if (event.event == "Progress") {
+            downloaded.value += event.chunkLength;
+          } else if (event.event == "Finished") {
+            status.value = "installing";
+          }
+        };
         const result = await invoke<InstallResult>("install_update", {
           url: update.downloadUrl,
           fileName: update.fileName,
@@ -128,13 +164,7 @@ export function useUpdater() {
         );
         return;
       }
-      savedPath.value = await invoke<string>("download_update", {
-        url: update.downloadUrl,
-        fileName: update.fileName,
-        onEvent: channel,
-      });
-      status.value = "downloaded";
-      await invoke("reveal_path", { path: savedPath.value });
+      await downloadManual(update.downloadUrl, update.fileName);
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason);
       status.value = "error";
@@ -169,6 +199,7 @@ export function useUpdater() {
     savedPath,
     error,
     checkForUpdates,
+    loadPendingUpdate,
     downloadUpdate,
   };
 }

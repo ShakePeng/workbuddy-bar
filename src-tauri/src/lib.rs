@@ -26,6 +26,8 @@ use url::Url;
 const TRAY_ID: &str = "workbuddybar";
 const EVENT_SNAPSHOT: &str = "snapshot-changed";
 const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
+const EVENT_UPDATE_WINDOW_OPENED: &str = "update-window-opened";
+const UPDATE_WINDOW_LABEL: &str = "update";
 const CONFIG_VERSION: u32 = 6;
 const AUTH_MODE_TOKEN: &str = "token";
 const AUTH_MODE_PASSWORD: &str = "password";
@@ -319,6 +321,7 @@ impl From<ApiError> for String {
 struct AppState {
     config: Mutex<AppConfig>,
     snapshot: Mutex<AppSnapshot>,
+    pending_update: Mutex<Option<UpdateInfo>>,
     http: Client,
     consecutive_errors: AtomicU32,
     quitting: AtomicBool,
@@ -335,6 +338,7 @@ impl AppState {
         Self {
             config: Mutex::new(AppConfig::default()),
             snapshot: Mutex::new(AppSnapshot::default()),
+            pending_update: Mutex::new(None),
             http,
             consecutive_errors: AtomicU32::new(0),
             quitting: AtomicBool::new(false),
@@ -358,6 +362,20 @@ impl AppState {
 
     fn set_snapshot(&self, snapshot: AppSnapshot) {
         *self.snapshot.lock().expect("snapshot lock poisoned") = snapshot;
+    }
+
+    fn pending_update(&self) -> Option<UpdateInfo> {
+        self.pending_update
+            .lock()
+            .expect("pending update lock poisoned")
+            .clone()
+    }
+
+    fn set_pending_update(&self, update: Option<UpdateInfo>) {
+        *self
+            .pending_update
+            .lock()
+            .expect("pending update lock poisoned") = update;
     }
 }
 
@@ -1480,6 +1498,9 @@ fn present_login(app: &AppHandle) {
     if let Some(settings) = app.get_webview_window("settings") {
         let _ = settings.hide();
     }
+    if let Some(update) = app.get_webview_window(UPDATE_WINDOW_LABEL) {
+        let _ = update.hide();
+    }
     if let Some(login) = app.get_webview_window("login") {
         let _ = login.center();
         let _ = login.show();
@@ -1890,6 +1911,7 @@ fn is_newer_version(remote: &str, current: &str) -> bool {
 
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    app.state::<AppState>().set_pending_update(None);
     let client = update_http_client(Some(UPDATE_CHECK_TIMEOUT))?;
     let response = client
         .get(UPDATE_MANIFEST_V2_URL)
@@ -1897,33 +1919,63 @@ async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
         .await
         .map_err(|error| format!("请求更新信息失败：{error}"))?;
     let current = app.package_info().version.to_string();
-    if response.status().is_success() {
+    let update = if response.status().is_success() {
         let manifest: UpdateManifestV2 = response
             .json()
             .await
             .map_err(|error| format!("解析更新信息失败：{error}"))?;
-        return Ok(update_info_from_v2(&manifest, &current));
-    }
-    if response.status() != StatusCode::NOT_FOUND {
+        update_info_from_v2(&manifest, &current)
+    } else if response.status() != StatusCode::NOT_FOUND {
         return Err(format!("请求更新信息失败：HTTP {}", response.status()));
-    }
+    } else {
+        let response = client
+            .get(UPDATE_MANIFEST_URL)
+            .send()
+            .await
+            .map_err(|error| format!("请求更新信息失败：{error}"))?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err("未找到更新清单，请前往 Release 页面手动下载".into());
+        }
+        let manifest: UpdateManifest = response
+            .error_for_status()
+            .map_err(|error| format!("请求更新信息失败：{error}"))?
+            .json()
+            .await
+            .map_err(|error| format!("解析更新信息失败：{error}"))?;
+        update_info_from_legacy(&manifest, &current)
+    };
 
-    let response = client
-        .get(UPDATE_MANIFEST_URL)
-        .send()
-        .await
-        .map_err(|error| format!("请求更新信息失败：{error}"))?;
-    if response.status() == StatusCode::NOT_FOUND {
-        return Err("未找到更新清单，请前往 Release 页面手动下载".into());
-    }
-    let manifest: UpdateManifest = response
-        .error_for_status()
-        .map_err(|error| format!("请求更新信息失败：{error}"))?
-        .json()
-        .await
-        .map_err(|error| format!("解析更新信息失败：{error}"))?;
+    app.state::<AppState>().set_pending_update(update.clone());
+    Ok(update)
+}
 
-    Ok(update_info_from_legacy(&manifest, &current))
+#[tauri::command]
+fn get_pending_update(state: State<'_, AppState>) -> Option<UpdateInfo> {
+    state.pending_update()
+}
+
+#[tauri::command]
+fn open_update_window(app: AppHandle) -> Result<(), String> {
+    if let Some(popover) = app.get_webview_window("popover") {
+        let _ = popover.hide();
+    }
+    let window = app
+        .get_webview_window(UPDATE_WINDOW_LABEL)
+        .ok_or_else(|| "更新窗口不存在".to_string())?;
+    window.center().map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    app.emit_to(UPDATE_WINDOW_LABEL, EVENT_UPDATE_WINDOW_OPENED, ())
+        .map_err(|error| format!("通知更新窗口失败：{error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_update_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window(UPDATE_WINDOW_LABEL)
+        .ok_or_else(|| "更新窗口不存在".to_string())?;
+    window.hide().map_err(|error| error.to_string())
 }
 
 fn update_platform_key() -> Option<&'static str> {
@@ -2541,6 +2593,9 @@ pub fn run() {
             open_settings,
             resize_popover,
             check_update,
+            get_pending_update,
+            open_update_window,
+            hide_update_window,
             download_update,
             install_update,
             reveal_path,
@@ -2646,6 +2701,30 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn stores_and_clears_pending_update() {
+        let state = AppState::new();
+        assert!(state.pending_update().is_none());
+
+        state.set_pending_update(Some(UpdateInfo {
+            version: "1.1.6".into(),
+            notes: "修复更新窗口".into(),
+            download_url: "https://example.com/app.zip".into(),
+            file_name: "app.zip".into(),
+            sha256: None,
+            self_update: false,
+            manual_download_url: None,
+            manual_file_name: None,
+        }));
+
+        let pending = state.pending_update().unwrap();
+        assert_eq!(pending.version, "1.1.6");
+        assert_eq!(pending.notes, "修复更新窗口");
+
+        state.set_pending_update(None);
+        assert!(state.pending_update().is_none());
     }
 
     #[test]

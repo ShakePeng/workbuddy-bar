@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WorkBuddyBar",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "identifier": "cn.shakepeng.workbuddybar",
   "build": {
     "beforeDevCommand": "yarn dev",
@@ -52,6 +52,22 @@
         "maxHeight": 700,
         "resizable": false,
         "center": true,
+        "visible": false
+      },
+      {
+        "label": "update",
+        "title": "WorkBuddyBar 更新",
+        "url": "index.html?view=update",
+        "width": 720,
+        "height": 620,
+        "minWidth": 720,
+        "minHeight": 620,
+        "maxWidth": 720,
+        "maxHeight": 620,
+        "resizable": false,
+        "center": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
         "visible": false
       }
     ],

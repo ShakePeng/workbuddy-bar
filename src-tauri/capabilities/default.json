@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for WorkBuddyBar windows",
-  "windows": ["login", "popover", "settings"],
+  "windows": ["login", "popover", "settings", "update"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging"
