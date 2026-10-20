@@ -134,6 +134,7 @@ onMounted(async () => {
     </header>
 
     <form v-if="!loading" class="settings-form" @submit.prevent="save">
+    <div class="settings-scroll">
     <div class="settings-grid">
       <section class="settings-section">
         <h2>连接</h2>
@@ -302,6 +303,7 @@ onMounted(async () => {
         <code>{{ settings?.configPath }}</code>
         <small>配置文件权限限制为 0600，令牌与账号密码不会写入日志。</small>
       </section>
+    </div>
     </div>
 
       <footer class="settings-actions">
