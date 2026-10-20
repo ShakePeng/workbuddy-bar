@@ -2,9 +2,10 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import type { AppSnapshot, AuthMode, SettingsInput, SettingsView } from "../types";
+import type { AppSnapshot, AuthMode, SettingsInput, SettingsView, ThemeMode } from "../types";
 import { useToast } from "../composables/useToast";
 import { useUpdater } from "../composables/useUpdater";
+import { applyTheme } from "../lib/theme";
 
 const loading = ref(true);
 const saving = ref(false);
@@ -20,6 +21,7 @@ const form = ref<SettingsInput>({
   refreshIntervalSec: 120,
   lowCreditThreshold: 1000,
   launchAtLogin: false,
+  themeMode: "system",
   singleColumn: false,
   showCreditOverview: true,
   showUsage: true,
@@ -29,6 +31,11 @@ const form = ref<SettingsInput>({
 const showToken = ref(false);
 const showPassword = ref(false);
 const currentVersion = ref("");
+const themeOptions: Array<{ value: ThemeMode; label: string }> = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
 
 const {
   status: updateStatus,
@@ -66,6 +73,7 @@ async function load() {
     const value = await invoke<SettingsView>("get_settings");
     settings.value = value;
     authMode.value = value.authMode;
+    applyTheme(value.themeMode);
     form.value = {
       baseUrl: value.baseUrl,
       token: value.token,
@@ -74,6 +82,7 @@ async function load() {
       refreshIntervalSec: value.refreshIntervalSec,
       lowCreditThreshold: value.lowCreditThreshold,
       launchAtLogin: value.launchAtLogin,
+      themeMode: value.themeMode,
       singleColumn: value.singleColumn,
       showCreditOverview: value.showCreditOverview,
       showUsage: value.showUsage,
@@ -215,7 +224,26 @@ onMounted(async () => {
       </section>
 
       <section class="settings-section wide">
-        <h2>首页展示</h2>
+        <h2>外观与首页</h2>
+        <div class="theme-setting">
+          <span>
+            <b>配色</b>
+            <small>默认跟随系统外观</small>
+          </span>
+          <div class="auth-mode-switch theme-options" role="radiogroup" aria-label="配色">
+            <button
+              v-for="option in themeOptions"
+              :key="option.value"
+              type="button"
+              role="radio"
+              :aria-checked="form.themeMode == option.value"
+              :class="{ active: form.themeMode == option.value }"
+              @click="form.themeMode = option.value"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+        </div>
         <label class="switch-row">
           <span>
             <b>单列展示</b>

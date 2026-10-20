@@ -1015,7 +1015,8 @@ button:disabled {
 .settings-section label > small,
 .settings-section.compact small,
 .switch-row small,
-.module-setting small {
+.module-setting small,
+.theme-setting small {
   color: var(--muted);
   font-size: 10px;
   font-weight: 400;
@@ -1039,19 +1040,25 @@ button:disabled {
   accent-color: #242426;
 }
 
-.module-setting {
+.module-setting,
+.theme-setting {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.module-setting > span {
+.module-setting > span,
+.theme-setting > span {
   display: flex;
   flex-direction: column;
   gap: 2px;
   color: #3a3a3e;
   font-size: 12px;
   font-weight: 600;
+}
+
+.theme-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .module-options {
@@ -1096,118 +1103,117 @@ button:disabled {
   box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f4f4f5;
-    --panel: rgba(30, 30, 32, 0.94);
-    --panel-solid: #1f1f21;
-    --card: rgba(51, 51, 54, 0.68);
-    --card-strong: rgba(58, 58, 61, 0.92);
-    --line: rgba(255, 255, 255, 0.11);
-    --muted: #a7a7ae;
-    --subtle: #8f8f97;
-    --shadow: 0 22px 60px rgba(0, 0, 0, 0.48), 0 2px 8px rgba(0, 0, 0, 0.34);
-  }
+:root[data-theme="dark"] {
+  color: #f4f4f5;
+  --panel: rgba(30, 30, 32, 0.94);
+  --panel-solid: #1f1f21;
+  --card: rgba(51, 51, 54, 0.68);
+  --card-strong: rgba(58, 58, 61, 0.92);
+  --line: rgba(255, 255, 255, 0.11);
+  --muted: #a7a7ae;
+  --subtle: #8f8f97;
+  --shadow: 0 22px 60px rgba(0, 0, 0, 0.48), 0 2px 8px rgba(0, 0, 0, 0.34);
+}
 
-  .login-page,
-  .settings-page {
-    background:
-      radial-gradient(circle at 10% 0%, rgba(245, 158, 11, 0.13), transparent 36%),
-      linear-gradient(180deg, #29292c 0%, #1f1f21 100%);
-  }
+:root[data-theme="dark"] .login-page,
+:root[data-theme="dark"] .settings-page {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(245, 158, 11, 0.13), transparent 36%),
+    linear-gradient(180deg, #29292c 0%, #1f1f21 100%);
+}
 
-  label,
-  .module-setting > span {
-    color: #d7d7db;
-  }
+:root[data-theme="dark"] label,
+:root[data-theme="dark"] .module-setting > span,
+:root[data-theme="dark"] .theme-setting > span {
+  color: #d7d7db;
+}
 
-  input[type="text"],
-  input[type="url"],
-  input[type="password"],
-  input[type="number"] {
-    color: #f4f4f5;
-    background: rgba(44, 44, 47, 0.92);
-  }
+:root[data-theme="dark"] input[type="text"],
+:root[data-theme="dark"] input[type="url"],
+:root[data-theme="dark"] input[type="password"],
+:root[data-theme="dark"] input[type="number"] {
+  color: #f4f4f5;
+  background: rgba(44, 44, 47, 0.92);
+}
 
-  .primary-button {
-    color: #171719;
-    background: #f2f2f4;
-  }
+:root[data-theme="dark"] .primary-button {
+  color: #171719;
+  background: #f2f2f4;
+}
 
-  .primary-button:hover:not(:disabled) {
-    background: #fff;
-  }
+:root[data-theme="dark"] .primary-button:hover:not(:disabled) {
+  background: #fff;
+}
 
-  .auth-mode-switch button.active {
-    color: #171719;
-    background: #f2f2f4;
-  }
+:root[data-theme="dark"] .auth-mode-switch button.active {
+  color: #171719;
+  background: #f2f2f4;
+}
 
-  .secondary-button,
-  .settings-section,
-  .icon-button,
-  .popover-footer button,
-  .module-options label {
-    background: rgba(58, 58, 61, 0.7);
-  }
+:root[data-theme="dark"] .secondary-button,
+:root[data-theme="dark"] .settings-section,
+:root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .popover-footer button,
+:root[data-theme="dark"] .module-options label {
+  background: rgba(58, 58, 61, 0.7);
+}
 
-  .secondary-button:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.16);
-    background: rgba(82, 82, 88, 0.92);
-  }
+:root[data-theme="dark"] .secondary-button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(82, 82, 88, 0.92);
+}
 
-  .popover-page {
-    border-color: rgba(255, 255, 255, 0.1);
-    background: linear-gradient(180deg, rgba(36, 36, 39, 0.92), rgba(25, 25, 28, 0.95));
-  }
+:root[data-theme="dark"] .popover-page {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(36, 36, 39, 0.92), rgba(25, 25, 28, 0.95));
+}
 
-  .hero-card {
-    background:
-      radial-gradient(circle at 100% 0%, rgba(245, 158, 11, 0.18), transparent 52%),
-      rgba(56, 56, 59, 0.72);
-  }
+:root[data-theme="dark"] .hero-card {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(245, 158, 11, 0.18), transparent 52%),
+    rgba(56, 56, 59, 0.72);
+}
 
-  .credit-number,
-  .week-line b,
-  .update-head b,
-  .update-row b {
-    color: #f7f7f8;
-  }
+:root[data-theme="dark"] .credit-number,
+:root[data-theme="dark"] .week-line b,
+:root[data-theme="dark"] .update-head b,
+:root[data-theme="dark"] .update-row b {
+  color: #f7f7f8;
+}
 
-  .credit-number.total {
-    color: #c7c7cc;
-  }
+:root[data-theme="dark"] .credit-number.total {
+  color: #c7c7cc;
+}
 
-  .progress-track {
-    background: rgba(255, 255, 255, 0.14);
-  }
+:root[data-theme="dark"] .progress-track {
+  background: rgba(255, 255, 255, 0.14);
+}
 
-  .expiring-badge.urgent {
-    color: #f87171;
-  }
+:root[data-theme="dark"] .expiring-badge.urgent {
+  color: #f87171;
+}
 
-  .metric-grid > div {
-    background: rgba(255, 255, 255, 0.055);
-  }
+:root[data-theme="dark"] .metric-grid > div {
+  background: rgba(255, 255, 255, 0.055);
+}
 
-  .popover-footer button {
-    color: #e4e4e7;
-  }
+:root[data-theme="dark"] .popover-footer button {
+  color: #e4e4e7;
+}
 
-  .popover-footer button:hover {
-    background: rgba(255, 255, 255, 0.14);
-  }
+:root[data-theme="dark"] .popover-footer button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
 
-  .toast-message {
-    background: rgba(56, 56, 59, 0.96);
-  }
+:root[data-theme="dark"] .toast-message {
+  background: rgba(56, 56, 59, 0.96);
+}
 
-  .toast-message.success {
-    color: #4ade80;
-  }
+:root[data-theme="dark"] .toast-message.success {
+  color: #4ade80;
+}
 
-  .settings-section.compact code {
-    color: #d0d0d5;
-    background: rgba(255, 255, 255, 0.055);
-  }
+:root[data-theme="dark"] .settings-section.compact code {
+  color: #d0d0d5;
+  background: rgba(255, 255, 255, 0.055);
 }

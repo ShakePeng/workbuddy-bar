@@ -26,9 +26,10 @@ use url::Url;
 const TRAY_ID: &str = "workbuddybar";
 const EVENT_SNAPSHOT: &str = "snapshot-changed";
 const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
-const CONFIG_VERSION: u32 = 5;
+const CONFIG_VERSION: u32 = 6;
 const AUTH_MODE_TOKEN: &str = "token";
 const AUTH_MODE_PASSWORD: &str = "password";
+const THEME_MODE_SYSTEM: &str = "system";
 // 管理端会话 Cookie 名称，登录后按原值回传，续期时以响应里的新值为准。
 const SESSION_COOKIE_NAME: &str = "wb_session";
 
@@ -38,6 +39,10 @@ fn default_auth_mode() -> String {
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_theme_mode() -> String {
+    THEME_MODE_SYSTEM.to_string()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,6 +69,8 @@ struct AppConfig {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    #[serde(default = "default_theme_mode")]
+    theme_mode: String,
     // 首页展示选项。旧配置没有这些字段时保持当前两列布局，并默认展示全部模块。
     #[serde(default)]
     single_column: bool,
@@ -90,6 +97,7 @@ impl Default for AppConfig {
             refresh_interval_sec: 120,
             low_credit_threshold: 1000.0,
             launch_at_login: false,
+            theme_mode: default_theme_mode(),
             single_column: false,
             show_credit_overview: true,
             show_usage: true,
@@ -123,6 +131,14 @@ fn normalize_auth_mode(raw: &str) -> String {
         AUTH_MODE_PASSWORD.to_string()
     } else {
         AUTH_MODE_TOKEN.to_string()
+    }
+}
+
+fn normalize_theme_mode(raw: &str) -> String {
+    match raw.trim() {
+        "light" => "light".to_string(),
+        "dark" => "dark".to_string(),
+        _ => THEME_MODE_SYSTEM.to_string(),
     }
 }
 
@@ -249,6 +265,7 @@ struct SettingsView {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    theme_mode: String,
     single_column: bool,
     show_credit_overview: bool,
     show_usage: bool,
@@ -267,6 +284,7 @@ struct SettingsInput {
     refresh_interval_sec: u64,
     low_credit_threshold: f64,
     launch_at_login: bool,
+    theme_mode: String,
     single_column: bool,
     show_credit_overview: bool,
     show_usage: bool,
@@ -406,6 +424,12 @@ fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     let auth_mode = normalize_auth_mode(&config.auth_mode);
     if auth_mode != config.auth_mode {
         config.auth_mode = auth_mode;
+        changed = true;
+    }
+
+    let theme_mode = normalize_theme_mode(&config.theme_mode);
+    if theme_mode != config.theme_mode {
+        config.theme_mode = theme_mode;
         changed = true;
     }
 
@@ -1661,6 +1685,7 @@ fn get_settings(app: AppHandle, state: State<'_, AppState>) -> Result<SettingsVi
         refresh_interval_sec: config.refresh_interval_sec,
         low_credit_threshold: config.low_credit_threshold,
         launch_at_login: config.launch_at_login,
+        theme_mode: config.theme_mode,
         single_column: config.single_column,
         show_credit_overview: config.show_credit_overview,
         show_usage: config.show_usage,
@@ -1706,6 +1731,7 @@ async fn save_settings(
     config.refresh_interval_sec = interval;
     config.low_credit_threshold = threshold;
     config.launch_at_login = settings.launch_at_login;
+    config.theme_mode = normalize_theme_mode(&settings.theme_mode);
     config.single_column = settings.single_column;
     config.show_credit_overview = settings.show_credit_overview;
     config.show_usage = settings.show_usage;
@@ -2826,12 +2852,21 @@ mod tests {
         assert_eq!(config.auth_mode, AUTH_MODE_TOKEN);
         assert_eq!(config.token, "wbt_abc");
         assert_eq!(config.base_url, "http://47.99.55.3:7864");
+        assert_eq!(config.theme_mode, THEME_MODE_SYSTEM);
         // 新增首页展示配置必须有兼容默认值：两列布局且四个模块全部展示。
         assert!(!config.single_column);
         assert!(config.show_credit_overview);
         assert!(config.show_usage);
         assert!(config.show_accounts);
         assert!(config.show_keys);
+    }
+
+    #[test]
+    fn normalizes_theme_mode() {
+        assert_eq!(normalize_theme_mode("light"), "light");
+        assert_eq!(normalize_theme_mode("dark"), "dark");
+        assert_eq!(normalize_theme_mode("system"), THEME_MODE_SYSTEM);
+        assert_eq!(normalize_theme_mode("unknown"), THEME_MODE_SYSTEM);
     }
 
     #[test]

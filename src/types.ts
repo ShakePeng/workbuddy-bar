@@ -1,5 +1,6 @@
 export type AuthState = "ok" | "login_required" | "error";
 export type AuthMode = "token" | "password";
+export type ThemeMode = "system" | "light" | "dark";
 export type AccountStatus = "healthy" | "cooling" | "disabled" | "expired" | "unavailable" | "unknown";
 
 export interface AccountView {
@@ -89,6 +90,7 @@ export interface HomepageSettings {
 export interface SettingsView extends HomepageSettings {
   baseUrl: string;
   authMode: AuthMode;
+  themeMode: ThemeMode;
   token: string;
   username: string;
   password: string;
