@@ -1,0 +1,58 @@
+src/components/SettingsView.vue
+  s_710d1649bde81e::t_48edf575126d49 283
+src/composables/useUpdater.ts
+  s_710d1649bde81e::t_e4bce9ca74bbbf 4-5
+  s_710d1649bde81e::t_20af1d88a4199b 16,63,66,69,76,78-89,96,98,105-122,124,126-127,130,133,139-148,167,202
+  s_710d1649bde81e::t_07ebf28fb14ca0 56
+package.json
+  s_710d1649bde81e::t_1cf4a3ba12f8d9 4
+src/components/PopoverView.vue
+  s_710d1649bde81e::t_e2373a6b014181 47
+  s_710d1649bde81e::t_8dcd2146d5db20 401
+src/components/UpdateView.vue
+  s_710d1649bde81e::t_e4bce9ca74bbbf 6,100
+  s_710d1649bde81e::t_b284f530c46973 1-5,7-46,48-99,101-197
+  s_710d1649bde81e::t_bbcc5d58695d7b 47
+src-tauri/tauri.conf.json
+  s_710d1649bde81e::t_5f44b912a376d7 56-71
+  s_710d1649bde81e::t_1cf4a3ba12f8d9 4
+src-tauri/capabilities/default.json
+  s_710d1649bde81e::t_5f44b912a376d7 5
+src/style.css
+  s_710d1649bde81e::t_520e6f4183178b 1053-1211,1214-1275,1289-1290,1296-1310
+  s_710d1649bde81e::t_88773d39e716b5 1212-1213
+  s_710d1649bde81e::t_771285827255d0 1311
+src-tauri/src/lib.rs
+  s_710d1649bde81e::t_0b7338aed7367f 29-30,324,341,366-378
+  s_710d1649bde81e::t_2606be2049cb09 1501-1503,2596-2598
+  s_710d1649bde81e::t_a5452949cd21e1 1914,1922,1927-1928,1930-1946,1949-1960,1962-1971,1973-1978
+  s_710d1649bde81e::t_986eb1025c169a 1948
+  s_710d1649bde81e::t_28ee9745da702c 379,2707-2729
+  s_710d1649bde81e::t_eb797222798ccd 2706
+src/App.vue
+  s_710d1649bde81e::t_27f5ae27ad128c 8,40
+README.md
+  s_710d1649bde81e::t_19b770d3f8546a 78-79,81
+src-tauri/Cargo.toml
+  s_710d1649bde81e::t_1cf4a3ba12f8d9 3
+CHANGELOG.md
+  s_710d1649bde81e::t_1cf4a3ba12f8d9 10-22
+src-tauri/Cargo.lock
+  s_710d1649bde81e::t_ed2ea5dadb8c87 5114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "e24d38705541f14447f3e9a62cf04d200de5315c",
+  "prompts": {},
+  "sessions": {
+    "s_710d1649bde81e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a158de-04ca-7f53-a997-7b60c33a2c32",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "ShakePeng <14865846+ShakePeng@users.noreply.github.com>"
+    }
+  }
+}
